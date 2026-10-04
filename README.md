@@ -329,10 +329,7 @@ python scripts/smoke_retrieval.py       # live TiDB retrieval, read-only
 
 ## Known limitations
 
-- **The corpus is awaiting formal review.** All 240 chunks are marked `pending_research_owner_review`. The demo runs with the review gates relaxed through the `ALLOW_*` flags. A production launch needs the research owner to review and approve each source first.
-- **No City of Vancouver licence source yet.** REG-02 has no official City source, so it shows as an honest `insufficient_evidence` gap, and chat answers about a home-based licence are hedged. Closing it also removes an extra Gemini round on every cold run.
 - **A stale minimum-wage figure in the corpus.** The BC Employment Standards Act text still states $16.75, while the government minimum-wage page states the current $18.25. The Act figure should be marked superseded.
-- **Scope is narrow on purpose.** Vancouver sole proprietors only; 13 requirements across registration, tax and employer obligations. Food safety, liquor, zoning, signage, incorporated businesses and other cities are not covered.
 - **No accounts yet.** A business is identified by the ID in its URL, and the rate limiter is single-process. Both are fine for an MVP or demo, not for production.
 
 ---
