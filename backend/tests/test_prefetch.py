@@ -1,6 +1,8 @@
 """Phase 2: prefetch + single-call agents. Gemini and retrieval are faked; no live calls."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import replace
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,10 +10,12 @@ from google.genai import errors
 
 from app.agents.base import ESCALATION_TOOL_CALLS, UNKNOWN_FACT, BaseAgent
 from app.agents.orchestrator import Orchestrator
+from app.agents.retrieval_adapter import STUB_KB_VERSION, kb_version
 from app.agents.schemas import AgentRunOutput, FindingDraft
 from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
 from app.contracts.assessment import ApplicabilityResult
 from app.contracts.facts import BusinessProfile
+from app.contracts.retrieval import RetrievalRequest, RetrievalResult
 from app.core.services import Services, build_stub_services
 from tests.fake_gemini import INVENTED_CHUNK, FakeGemini
 from tests.test_agents import assess_maya, use_fake
@@ -42,6 +46,42 @@ def plan_for(
 
 def prefetch_entries(output: AgentRunOutput) -> list:
     return [t for t in output.trace if t.tool_input.get("source") == "prefetch"]
+
+
+class CountingRetrieval:
+    """Wraps the stub service and counts calls. ``batched`` adds Developer 1's Phase 1 interface."""
+
+    def __init__(self, inner: Any, batched: bool) -> None:
+        self._inner = inner
+        self.singles: list[RetrievalRequest] = []
+        self.batches: list[list[RetrievalRequest]] = []
+        if batched:
+            self.retrieve_many = self._retrieve_many  # type: ignore[method-assign]
+
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
+        self.singles.append(request)
+        return self._inner.retrieve(request)
+
+    def _retrieve_many(self, requests: Sequence[RetrievalRequest]) -> list[RetrievalResult]:
+        self.batches.append(list(requests))
+        return [self._inner.retrieve(request) for request in requests]
+
+    def knowledge_base_version(self) -> str:
+        return "kb-test-1"
+
+
+def counting_services(batched: bool) -> tuple[Services, CountingRetrieval]:
+    services = build_stub_services()
+    retrieval = CountingRetrieval(services.retrieval, batched)
+    return replace(services, retrieval=retrieval), retrieval
+
+
+async def prefetch_with(services: Services, profile: BusinessProfile, agent_name: str) -> AgentRunOutput:
+    agent, scope, mode = plan_for(services, FakeGemini(), profile, agent_name)
+    output = AgentRunOutput(agent=agent.name, mode=mode, scope=scope)
+    toolbox = AgentToolbox(agent.name, "a-batch", profile, services, output, agent.tool_names)
+    await agent.prefetch(toolbox, profile, scope, mode)
+    return output
 
 
 # --- prefetch ---------------------------------------------------------------------------------
@@ -87,6 +127,62 @@ async def test_prefetch_caps_chunks_and_reads_facts_once(maya: BusinessProfile) 
     assert all(len(r.chunks) <= 6 for r in pack.requirements)
     fact_entries = [t for t in prefetch_entries(output) if t.tool_name == "get_profile_fact"]
     assert [t.tool_input["key"] for t in fact_entries] == ["has_employees", "plans_to_hire"]
+
+
+# --- batched retrieval ------------------------------------------------------------------------
+
+
+async def test_prefetch_batches_the_whole_scope(maya: BusinessProfile) -> None:
+    services, retrieval = counting_services(batched=True)
+    output = await prefetch_with(services, maya, "registration")
+
+    assert len(retrieval.batches) == 1  # one service call for every (requirement, query) pair
+    assert retrieval.singles == []
+    batch = retrieval.batches[0]
+    entries = [t for t in prefetch_entries(output) if t.tool_name == "retrieve_evidence"]
+    assert len(entries) == len(batch)  # one trace entry per pair, in request order
+    assert [(t.tool_input["requirement_id"], t.tool_input["query"]) for t in entries] == [
+        (r.requirement_ids[0], r.query) for r in batch
+    ]
+    for request in batch:  # the filters that keep evidence safe to cite survive batching
+        assert request.jurisdiction_ids == maya.jurisdiction_ids
+        assert request.segment_id == maya.segment_id
+        assert request.area == "registration"
+        assert request.limit == 3
+
+
+async def test_sequential_fallback_matches_the_batched_result(maya: BusinessProfile) -> None:
+    batched_services, batched = counting_services(batched=True)
+    fallback_services, fallback = counting_services(batched=False)
+
+    batched_output = await prefetch_with(batched_services, maya, "tax")
+    fallback_output = await prefetch_with(fallback_services, maya, "tax")
+
+    assert len(fallback.singles) == len(batched.batches[0])  # one retrieve per pair, no batching
+    assert fallback.batches == []
+    assert fallback_output.evidence_by_requirement == batched_output.evidence_by_requirement
+    assert fallback_output.retrieved.keys() == batched_output.retrieved.keys()
+
+
+def test_out_of_scope_pair_does_not_reach_the_service(maya: BusinessProfile) -> None:
+    services, retrieval = counting_services(batched=True)
+    agent, scope, mode = plan_for(services, FakeGemini(), maya, "tax")
+    output = AgentRunOutput(agent=agent.name, mode=mode, scope=scope)
+    toolbox = AgentToolbox(agent.name, "a-scope", maya, services, output, agent.tool_names)
+
+    in_scope = scope[0].requirement_id
+    results = toolbox.retrieve_evidence_many([("REG-01", "q"), (in_scope, "q")])
+
+    assert "not in your scope" in results[0]["error"]
+    assert results[1]["status"] == "supported"
+    assert [r.requirement_ids[0] for r in retrieval.batches[0]] == [in_scope]
+    assert [t.tool_input["requirement_id"] for t in output.trace] == ["REG-01", in_scope]
+    assert "REG-01" not in output.evidence_by_requirement
+
+
+def test_kb_version_prefers_the_service() -> None:
+    assert kb_version(CountingRetrieval(None, batched=True)) == "kb-test-1"
+    assert kb_version(build_stub_services().retrieval) == STUB_KB_VERSION
 
 
 # --- the call budget --------------------------------------------------------------------------

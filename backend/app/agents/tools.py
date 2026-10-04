@@ -5,7 +5,7 @@ requirements), records every retrieved chunk (for citation validation) and write
 per call. Tool outputs never include links: those come only from the registry, in code.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,12 +13,12 @@ from google.genai import types
 
 from app.agents.schemas import AgentName, AgentRunOutput
 from app.contracts.facts import BusinessProfile
-from app.contracts.retrieval import RetrievalRequest
+from app.contracts.retrieval import RetrievalRequest, RetrievalResult
 from app.contracts.trace import AgentTraceEntry
 from app.core.services import Services
 
 CALCULATOR_NAMES = ("pst_small_seller_test", "gst_small_supplier_test")
-EVIDENCE_LIMIT = 3
+EVIDENCE_LIMIT = 3  # per query, so two phrasings of one requirement can yield up to six chunks
 
 _STR = {"type": "string"}
 
@@ -144,17 +144,65 @@ class AgentToolbox:
     def retrieve_evidence(self, requirement_id: str, query: str) -> dict[str, Any]:
         if requirement_id not in self.scope_ids:
             return {"error": f"{requirement_id} is not in your scope."}
-        result = self.services.retrieval.retrieve(
-            RetrievalRequest(
-                query=query,
-                jurisdiction_ids=self.profile.jurisdiction_ids,
-                segment_id=self.profile.segment_id,
-                area=self.agent,
-                requirement_ids=[requirement_id],
-                as_of=datetime.now(timezone.utc),
-                limit=EVIDENCE_LIMIT,
-            )
+        return self._register(requirement_id, self.services.retrieval.retrieve(self._request(requirement_id, query)))
+
+    def retrieve_evidence_many(
+        self, pairs: Sequence[tuple[str, str]], source: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Retrieve evidence for several ``(requirement_id, query)`` pairs at once.
+
+        Returns one result per input pair, in input order, and writes one trace entry per pair, so
+        the trace reads exactly as if ``retrieve_evidence`` had been called for each. Uses
+        ``RetrievalService.retrieve_many`` when the service exposes it (Phase 1 batches the Gemini
+        query embedding there), and falls back to sequential ``retrieve`` until it lands.
+        """
+        requests: list[RetrievalRequest] = []
+        batched: list[int] = []
+        results: dict[int, dict[str, Any]] = {}
+        for index, (requirement_id, query) in enumerate(pairs):
+            if "retrieve_evidence" not in self.tool_names:
+                results[index] = {"error": "Tool retrieve_evidence is not available to you."}
+            elif requirement_id not in self.scope_ids:
+                results[index] = {"error": f"{requirement_id} is not in your scope."}
+            else:
+                requests.append(self._request(requirement_id, query))
+                batched.append(index)
+
+        for index, result in zip(batched, self._retrieve_batch(requests), strict=True):
+            results[index] = self._register(pairs[index][0], result)
+
+        for index, (requirement_id, query) in enumerate(pairs):
+            args = {"requirement_id": requirement_id, "query": query}
+            self.log("retrieve_evidence", args, _summarize("retrieve_evidence", results[index]), source)
+        return [results[index] for index in range(len(pairs))]
+
+    def _retrieve_batch(self, requests: list[RetrievalRequest]) -> list[RetrievalResult]:
+        """One service call when batching is available, otherwise one per request."""
+        if not requests:
+            return []
+        retrieve_many = getattr(self.services.retrieval, "retrieve_many", None)
+        if callable(retrieve_many):
+            return list(retrieve_many(requests))
+        return [self.services.retrieval.retrieve(request) for request in requests]
+
+    def _request(self, requirement_id: str, query: str) -> RetrievalRequest:
+        """One retrieval request, carrying the filters that keep evidence safe to cite."""
+        return RetrievalRequest(
+            query=query,
+            jurisdiction_ids=self.profile.jurisdiction_ids,
+            segment_id=self.profile.segment_id,
+            area=self.agent,
+            requirement_ids=[requirement_id],
+            as_of=datetime.now(timezone.utc),
+            limit=EVIDENCE_LIMIT,
         )
+
+    def _register(self, requirement_id: str, result: RetrievalResult) -> dict[str, Any]:
+        """Make every returned chunk citable in this run, then summarize it for the model.
+
+        Dedupe is per requirement on purpose: one chunk can legitimately support more than one
+        requirement, so the same chunk ID may appear under several requirements in the same run.
+        """
         ids = self.output.evidence_by_requirement.setdefault(requirement_id, [])
         for chunk in result.chunks:
             self.output.retrieved[chunk.chunk_id] = chunk

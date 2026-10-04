@@ -15,7 +15,13 @@ from typing import Any, ClassVar
 from google.genai import types
 
 from app.agents.models import EvidencePack, RequirementEvidence
-from app.agents.retrieval_adapter import CHUNKS_PER_REQUIREMENT, Chunk, default_queries, fact_keys, to_chunk
+from app.agents.retrieval_adapter import (
+    CHUNKS_PER_REQUIREMENT,
+    Chunk,
+    default_queries,
+    fact_keys,
+    to_chunk,
+)
 from app.agents.schemas import AgentName, AgentReport, AgentRunOutput
 from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
 from app.contracts.assessment import ApplicabilityResult
@@ -159,31 +165,30 @@ class BaseAgent:
     ) -> EvidencePack:
         """Gather all evidence for the agent's scope through the toolbox. Zero Gemini calls.
 
-        Every lookup goes through ``AgentToolbox.call`` so retrieved chunks stay registered for
-        the strict citation filter and every step lands in the trace with ``source="prefetch"``.
-        Lookups run sequentially: the toolbox mutates shared per-run state and the retrieval
-        service is synchronous, so there is nothing safe to overlap here.
+        Every lookup goes through the toolbox so retrieved chunks stay registered for the strict
+        citation filter and every step lands in the trace with ``source="prefetch"``. Retrieval for
+        the whole scope goes out as one batch, because every query otherwise costs its own Gemini
+        query embedding; the rest is sequential, since the toolbox mutates shared per-run state.
         """
         pack = EvidencePack(agent=self.name, mode=mode, profile_summary=profile_summary(profile))
+        planned = [
+            (applicability, req)
+            for applicability in scope
+            if (req := self.services.registry.get(applicability.requirement_id)) is not None
+        ]
         toolbox.log(
             "prefetch",
-            {"requirement_ids": [a.requirement_id for a in scope]},
-            f"gathering evidence for {len(scope)} requirement(s)",
+            {"requirement_ids": [req.id for _, req in planned]},
+            f"gathering evidence for {len(planned)} requirement(s)",
             source=PREFETCH,
+        )
+        toolbox.retrieve_evidence_many(
+            [(req.id, query) for _, req in planned for query in default_queries(req)], source=PREFETCH
         )
 
         facts_read: dict[str, dict[str, Any]] = {}  # one lookup (and one trace entry) per fact key
-        for applicability in scope:
-            req = self.services.registry.get(applicability.requirement_id)
-            if req is None:
-                continue
+        for applicability, req in planned:
             details = toolbox.call("get_requirement", {"requirement_id": req.id}, source=PREFETCH)
-            for query in default_queries(req):
-                toolbox.call(
-                    "retrieve_evidence", {"requirement_id": req.id, "query": query}, source=PREFETCH
-                )
-                if len(toolbox.output.evidence_by_requirement.get(req.id, [])) >= CHUNKS_PER_REQUIREMENT:
-                    break
             keys = fact_keys(req) or list(profile.facts)
             for key in keys:
                 if key not in facts_read:
