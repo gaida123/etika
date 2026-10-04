@@ -39,7 +39,7 @@ class Requirement(BaseModel):
     )
     priority: Priority
     source_chunk_ids: list[str] = Field(default_factory=list)
-    action_url: str = Field(description="Official page or form. The only place links come from.")
+    action_url: str | None = Field(default=None, description="Official page or form. Never a placeholder.")
     preparation_items: list[str] = Field(default_factory=list)
     review_flags: list[str] = Field(default_factory=list, description="Known gray areas.")
     last_verified_at: date | None = None

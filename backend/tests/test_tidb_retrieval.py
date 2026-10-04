@@ -7,7 +7,7 @@ same tests exercise the TiDB row mapping without requiring a live cloud connecti
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import Boolean, Column, Integer, JSON, MetaData, String, Table, Text
+from sqlalchemy import Boolean, Column, Integer, JSON, MetaData, String, Table, Text, text
 from sqlalchemy.engine import Engine
 
 from app.contracts.retrieval import RetrievalRequest
@@ -213,6 +213,42 @@ def test_unscoped_unknown_query_does_not_return_broad_area_evidence(corpus_engin
     assert result.chunks == []
 
 
+def test_retrieve_many_preserves_request_order_and_all_filters(corpus_engine: Engine) -> None:
+    service = TiDBRetrievalService(
+        corpus_engine,
+        allow_unreviewed=True,
+        allow_candidate_requirement_mappings=True,
+    )
+    requests = [_request(requirement_ids=["TAX-99"]), _request(requirement_ids=["TAX-01"])]
+
+    results = service.retrieve_many(requests)
+
+    assert [result.query_used for result in results] == [request.query for request in requests]
+    assert [[chunk.chunk_id for chunk in result.chunks] for result in results] == [
+        ["candidate-pending"],
+        ["mapped-approved"],
+    ]
+    for request, result in zip(requests, results, strict=True):
+        assert result.filters_applied["jurisdiction_ids"] == request.jurisdiction_ids
+        assert result.filters_applied["segment_id"] == request.segment_id
+        assert result.filters_applied["area"] == request.area
+        assert result.filters_applied["requirement_ids"] == request.requirement_ids
+
+
+def test_knowledge_base_version_changes_with_current_source_version(corpus_engine: Engine) -> None:
+    service = TiDBRetrievalService(corpus_engine)
+
+    initial = service.knowledge_base_version()
+    with corpus_engine.begin() as connection:
+        connection.execute(
+            text("UPDATE knowledge_chunks SET source_version = :version WHERE chunk_id = :chunk_id"),
+            {"version": "2026-10-05", "chunk_id": "mapped-approved"},
+        )
+
+    assert len(initial) == 64
+    assert service.knowledge_base_version() != initial
+
+
 def test_semantic_distance_is_converted_to_descending_score() -> None:
     assert _semantic_score(0.0) == 1.0
     assert _semantic_score("0.25") == 0.75
@@ -230,6 +266,41 @@ class _FakeEmbeddingProvider:
         return [self.embed(text) for text in texts]
 
 
+class _BatchEmbeddingProvider(_FakeEmbeddingProvider):
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(texts)
+        return super().embed_many(texts)
+
+
+class _SemanticBatchService(TiDBRetrievalService):
+    """Avoid TiDB vector SQL in SQLite while exercising the batch planning contract."""
+
+    def __init__(self, provider: _BatchEmbeddingProvider) -> None:
+        super().__init__("not-a-bind", use_semantic=True, embedding_provider=provider)
+        self.embeddings_seen: list[list[float] | None] = []
+
+    def _semantic_coverage_is_complete(self, area: str | None) -> bool:
+        return True
+
+    def _load_candidates(
+        self, area: str | None, query_embedding: list[float] | None = None
+    ) -> list[dict[str, object]]:
+        self.embeddings_seen.append(query_embedding)
+        return [
+            _row(
+                "semantic-mapped",
+                source_id="semantic-source",
+                title="PST small seller exemption",
+                body="Small sellers need not register for BC PST.",
+                mapped=["TAX-01"],
+            )
+            | ({"semantic_distance": 0.1} if query_embedding is not None else {})
+        ]
+
+
 def test_partial_vector_backfill_uses_lexical_fallback(corpus_engine: Engine) -> None:
     service = TiDBRetrievalService(
         corpus_engine,
@@ -242,3 +313,21 @@ def test_partial_vector_backfill_uses_lexical_fallback(corpus_engine: Engine) ->
     assert result.status == "supported"
     assert result.filters_applied["ranking"] == "lexical_fallback"
     assert any("Vector backfill is incomplete" in item for item in result.limitations)
+
+
+def test_retrieve_many_batches_semantic_query_embeddings() -> None:
+    provider = _BatchEmbeddingProvider()
+    service = _SemanticBatchService(provider)
+    requests = [
+        _request(requirement_ids=["TAX-01"], query="BC PST small seller"),
+        _request(requirement_ids=["TAX-01"], query="PST registration exemption"),
+    ]
+
+    results = service.retrieve_many(requests)
+
+    assert provider.calls == [[request.query for request in requests]]
+    assert service.embeddings_seen == [[0.1, 0.2], [0.1, 0.2]]
+    assert [result.filters_applied["ranking"] for result in results] == [
+        "semantic_vector",
+        "semantic_vector",
+    ]

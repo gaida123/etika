@@ -13,7 +13,7 @@ from app.contracts.registry import Requirement
 from app.contracts.retrieval import RetrievedChunk
 
 CHUNKS_PER_REQUIREMENT = 6
-STUB_KB_VERSION = "stub"
+STUB_KB_VERSION = "stub-v1"
 
 
 def kb_version(retrieval: object) -> str:

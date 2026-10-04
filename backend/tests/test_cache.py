@@ -54,6 +54,7 @@ def test_fingerprint_changes_with_facts_or_stubs(maya: BusinessProfile) -> None:
     assert profile_fingerprint(maya, True) != profile_fingerprint(maya, False)
     assert profile_fingerprint(maya, True) == profile_fingerprint(shuffled, True)
     assert profile_fingerprint(maya, True) == profile_fingerprint(without_unknown, True)
+    assert profile_fingerprint(maya, True, "kb-a") != profile_fingerprint(maya, True, "kb-b")
 
 
 def test_successful_result_is_saved_and_served_on_later_failure(session: Session, maya: BusinessProfile) -> None:
@@ -85,6 +86,23 @@ def test_cache_is_not_served_for_a_different_fingerprint(session: Session, maya:
     served = with_cache(session, hired, _failed(), use_stubs=True)
     assert served.cached is False
     assert served.assessment_id == "fail-1"
+
+
+def test_cache_is_not_served_after_the_knowledge_base_changes(session: Session, maya: BusinessProfile) -> None:
+    with_cache(session, maya, _response(), use_stubs=True, knowledge_base_version="kb-before")
+
+    served = with_cache(session, maya, _failed(), use_stubs=True, knowledge_base_version="kb-after")
+
+    assert served.cached is False
+    assert served.assessment_id == "fail-1"
+
+
+def test_cache_is_skipped_when_knowledge_base_version_is_unavailable(session: Session, maya: BusinessProfile) -> None:
+    live = with_cache(session, maya, _response(), use_stubs=True, knowledge_base_version=None)
+    served = with_cache(session, maya, _failed(), use_stubs=True, knowledge_base_version=None)
+
+    assert live.cached is False
+    assert served.cached is False
 
 
 def test_successful_rerun_overwrites_the_cached_response(session: Session, maya: BusinessProfile) -> None:

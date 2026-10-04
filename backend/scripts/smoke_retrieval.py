@@ -8,7 +8,8 @@ This script does not write to TiDB. It exercises the real
 ``TiDBRetrievalService`` directly (rather than the application service factory)
 so it remains useful while the registry, applicability, calculator, and scoring
 services are still stubs. When ``USE_TIDB_SEMANTIC_RETRIEVAL=true``, it makes one
-Gemini embedding call per test query and asserts TiDB vector ranking was used.
+batched Gemini embedding call for the test queries and asserts TiDB vector
+ranking was used.
 
 The positive TAX-01 case relies on the development corpus gates in ``.env``:
 ``ALLOW_UNREVIEWED_KNOWLEDGE=true`` and
@@ -111,9 +112,11 @@ def main() -> None:
     # Construct the live adapter directly: ``get_services()`` may intentionally
     # return the all-stub bundle until the full Dev 1 cutover is ready.
     service = TiDBRetrievalService()
-    positive = service.retrieve(POSITIVE_CASE)
-    negative = service.retrieve(NEGATIVE_CASE)
-    reg_02_gap = service.retrieve(REG_02_GAP_CASE)
+    # One ordered batch proves the Phase 2 prefetch contract without making a
+    # separate Gemini embedding request for each query.
+    positive, negative, reg_02_gap = service.retrieve_many(
+        [POSITIVE_CASE, NEGATIVE_CASE, REG_02_GAP_CASE]
+    )
 
     _print_chunks("TAX-01 / BC PST", positive)
     _print_chunks("NOPE-99 / deliberate negative", negative)

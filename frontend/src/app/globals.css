@@ -2,7 +2,7 @@
 
 /* Tokens and primitives ported from "Compliance Navigator Wireframes.html". */
 @theme {
-  --font-sans: var(--font-geist), system-ui, sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --color-brand: #2c4a21;
   --color-brand-hover: #1f3618;
   --color-brand-tint: #f3f6f1;

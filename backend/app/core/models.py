@@ -5,11 +5,11 @@ that reference them (``assessment_id``, chunk IDs) are plain strings without for
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -42,6 +42,30 @@ class BusinessProfileRow(Base):
     revenue_entries: Mapped[list["RevenueEntryRow"]] = relationship(
         back_populates="profile", order_by="RevenueEntryRow.month", cascade="all, delete-orphan"
     )
+
+
+class RequirementRow(Base):
+    """Reviewed registry data loaded into TiDB by ``scripts/load_registry.py``."""
+
+    __tablename__ = "requirements"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    area: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    requirement_type: Mapped[str] = mapped_column(String(32))
+    timing: Mapped[str] = mapped_column(String(32))
+    applies_if: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    trigger_rule: Mapped[str | None] = mapped_column(String(64))
+    required_fact_keys: Mapped[list[str]] = mapped_column(JSON, default=list)
+    depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)
+    depends_on_any: Mapped[list[str]] = mapped_column(JSON, default=list)
+    priority: Mapped[str] = mapped_column(String(16))
+    source_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    action_url: Mapped[str | None] = mapped_column(Text)
+    preparation_items: Mapped[list[str]] = mapped_column(JSON, default=list)
+    review_flags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    last_verified_at: Mapped[date | None] = mapped_column(Date)
+    review_status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
 
 
 class RevenueEntryRow(Base):

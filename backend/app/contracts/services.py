@@ -4,6 +4,7 @@ Stubs live in ``app.knowledge.stubs`` and ``app.assessment.stubs``; real impleme
 them without changing these signatures.
 """
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from app.contracts.assessment import ApplicabilityResult, AssessmentResult, CalculatorResult, Finding
@@ -17,6 +18,10 @@ class RetrievalService(Protocol):
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult: ...
 
+    def retrieve_many(self, requests: Sequence[RetrievalRequest]) -> list[RetrievalResult]: ...
+
+    def knowledge_base_version(self) -> str: ...
+
 
 class RegistryService(Protocol):
     """Read access to the requirement registry."""
@@ -24,6 +29,8 @@ class RegistryService(Protocol):
     def get(self, requirement_id: str) -> Requirement | None: ...
 
     def list_by_area(self, area: Area) -> list[Requirement]: ...
+
+    def all(self) -> list[Requirement]: ...
 
 
 class ApplicabilityService(Protocol):

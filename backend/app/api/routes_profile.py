@@ -5,11 +5,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.contracts.facts import BusinessProfile
+from app.contracts.facts import BusinessProfile, FactValue
 from app.core.db import get_session
 from app.core.services import Services, get_services
 from app.intake import profile_service
-from app.intake.profile_service import ProfileCreate, ProfileNotFoundError
+from app.intake.fact_dictionary import PROFILE_FIELD_KEYS, InvalidFactValue, parse_fact_value
+from app.intake.profile_service import ProfileCreate, ProfileNotFoundError, ProfileUpdate
 from app.intake.proposals import (
     InvalidConfirmationError,
     ProposalAlreadyConfirmedError,
@@ -17,7 +18,7 @@ from app.intake.proposals import (
     confirm_proposal,
 )
 from app.intake.questions import FollowUpQuestion, follow_up_questions
-from app.intake.schemas import ConfirmUpdateRequest, ConfirmUpdateResponse
+from app.intake.schemas import ConfirmUpdateRequest, ConfirmUpdateResponse, DirectProfileUpdateRequest
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -43,6 +44,40 @@ def get_profile(
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     return profile
+
+
+@router.patch("/{business_id}")
+def update_profile(
+    business_id: str, body: DirectProfileUpdateRequest, session: SessionDep
+) -> BusinessProfile:
+    """Save owner-confirmed dashboard answers as a new immutable profile version.
+
+    This is intentionally separate from ``confirm-update``: no Gemini proposal is
+    involved, so every supplied fact is immediately marked ``confirmed=true``.
+    The shared fact dictionary validates raw browser values before they are stored.
+    """
+    if not body.has_changes():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Provide at least one answer")
+
+    try:
+        values = {key: parse_fact_value(key, value) for key, value in body.facts.items()}
+    except InvalidFactValue as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+    update = ProfileUpdate(
+        legal_name=values.get("legal_name"),
+        trading_name=values.get("trading_name"),
+        facts={
+            key: FactValue(value=value, confirmed=True)
+            for key, value in values.items()
+            if key not in PROFILE_FIELD_KEYS
+        },
+        monthly_revenue=body.monthly_revenue,
+    )
+    try:
+        return profile_service.update_facts(session, business_id, update)
+    except ProfileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Profile not found") from exc
 
 
 @router.post("/{business_id}/confirm-update")

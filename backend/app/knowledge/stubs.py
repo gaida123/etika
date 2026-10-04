@@ -6,6 +6,7 @@ Developer 2 can build agents before TiDB retrieval exists. All evidence text is 
 """
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +87,18 @@ class StubRetrievalService:
             filters_applied=filters,
             limitations=limitations,
         )
+
+    def retrieve_many(self, requests: Sequence[RetrievalRequest]) -> list[RetrievalResult]:
+        """Return one result per request in input order.
+
+        The stub has no remote embedding call to coalesce, but exposing the same batch
+        contract lets the agent prefetch path exercise production-shaped behaviour.
+        """
+        return [self.retrieve(request) for request in requests]
+
+    def knowledge_base_version(self) -> str:
+        """Stable identity for the checked-in placeholder corpus."""
+        return "stub-v1"
 
 
 def _to_chunk(row: dict[str, Any]) -> RetrievedChunk:

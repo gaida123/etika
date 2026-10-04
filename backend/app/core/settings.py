@@ -20,8 +20,12 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./reegal.db"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.5-flash"
     gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables
+    # Browser-facing runs must finish before the frontend proxy gives up. A failed model
+    # call is safe: the agent is visibly marked unavailable and code still returns the
+    # deterministic applicability assessment.
+    gemini_request_timeout_ms: int = 12_000
     gemini_embedding_model: str = "gemini-embedding-001"
     # The configured model's live probe returned 3072 dimensions. This must match
     # TiDB's VECTOR(D) column and every document/query embedding.
@@ -29,6 +33,9 @@ class Settings(BaseSettings):
     use_stubs: bool = True
     agent_mode: Literal["prefetch", "legacy"] = "prefetch"  # prefetch: one Gemini call per agent
     escalation_enabled: bool = True  # one extra investigate+report round for weak findings
+    # Offset specialist launches slightly in live runs. This preserves the three independent
+    # agents while avoiding a simultaneous burst against a shared model capacity pool.
+    agent_start_stagger_seconds: float = 1.5
     # Lets us exercise the real TiDB corpus while the rest of Developer 1's services
     # are still stubs. This is a staging switch, not the production cutover switch.
     use_tidb_retrieval: bool = False
@@ -39,6 +46,9 @@ class Settings(BaseSettings):
     # research review and requirement mappings are complete.
     allow_unreviewed_knowledge: bool = False
     allow_candidate_requirement_mappings: bool = False
+    # Demo-only override for the current registry draft. Production must expose
+    # only rows that the research owner has marked approved.
+    allow_draft_registry: bool = False
 
 
 @lru_cache

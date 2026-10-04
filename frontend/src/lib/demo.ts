@@ -8,8 +8,10 @@
 import type {
   Assessment,
   AssessmentItem,
+  AgentTraceEntry,
   BusinessProfile,
   ChatResponse,
+  DraftEmail,
   FactAnswers,
   FollowUpQuestion,
   RequirementDetail,
@@ -110,7 +112,7 @@ function item(id: string, patch: Partial<AssessmentItem> = {}): AssessmentItem {
   const s = SPECS.find((x) => x.id === id)!;
   return {
     requirement_id: id, title: s.title, area: s.area, priority: s.priority,
-    applicability: "upcoming", status: "not_yet_required", explanation: s.explanation, action_url: NO_LINK,
+    applicability: "upcoming", status: "not_yet_required", explanation: s.explanation, action_url: null,
     sources: [{ title: s.source, url: NO_LINK }], progress: null, trigger: null, missing_facts: [],
     ...patch,
   };
@@ -199,18 +201,74 @@ export const demoBackend = {
   getRequirement: (id: string) => {
     const s = SPECS.find((x) => x.id === id);
     if (!s) return Promise.reject(new Error("Requirement not found"));
+    const insufficientEvidence = id === "REG-02";
     const detail: RequirementDetail = {
       requirement: {
         ...s, requirement_type: s.recommendation ? "recommendation" : "legal_obligation",
         timing: NOW.includes(id) ? "now" : s.recommendation ? "recommendation" : "trigger",
-        action_url: NO_LINK, last_verified_at: null,
+        // The demo deliberately mirrors the live registry: no made-up action links.
+        action_url: null, last_verified_at: null,
       },
       evidence: {
-        status: "supported", limitations: [],
-        chunks: [{ chunk_id: `${id}-a`, source_id: id, text: `[Sample passage] ${s.passage}`, title: s.source, section_path: null, url: NO_LINK, source_version: "sample" }],
+        status: insufficientEvidence ? "insufficient_evidence" : "supported",
+        limitations: insufficientEvidence ? ["No approved City of Vancouver licence source is in the current knowledge base."] : [],
+        chunks: insufficientEvidence
+          ? []
+          : [{ chunk_id: `${id}-a`, source_id: id, text: `[Sample passage] ${s.passage}`, title: s.source, section_path: null, url: NO_LINK, source_version: "sample" }],
       },
     };
     return wait(detail, 300);
+  },
+  getAssessmentTrace: (assessmentId: string): Promise<AgentTraceEntry[]> =>
+    wait(
+      [
+        {
+          assessment_id: assessmentId,
+          agent: "orchestrator",
+          step: 0,
+          tool_name: "plan",
+          tool_input: { profile_version: profile.profile_version },
+          tool_output_summary: "Running registration and tax agents; employer agent is in pre-hire mode.",
+          created_at: new Date().toISOString(),
+        },
+        {
+          assessment_id: assessmentId,
+          agent: "tax",
+          step: 1,
+          tool_name: "retrieve_evidence",
+          tool_input: { requirement_id: "TAX-01" },
+          tool_output_summary: "Read BC PST small-seller evidence and flagged recurring market sales for review.",
+          created_at: new Date().toISOString(),
+        },
+        {
+          assessment_id: assessmentId,
+          agent: "registration",
+          step: 1,
+          tool_name: "retrieve_evidence",
+          tool_input: { requirement_id: "REG-01" },
+          tool_output_summary: "Read BC Registries evidence for trading-name registration.",
+          created_at: new Date().toISOString(),
+        },
+      ],
+      120,
+    ),
+  draftEmail: (_: string, requirementId: string): Promise<DraftEmail> => {
+    const requirement = SPECS.find((s) => s.id === requirementId);
+    const subject = `Question about ${requirement?.title ?? requirementId}`;
+    const body = `Hello,\n\nI run a small sole proprietorship in Vancouver and have a question about ${requirement?.title ?? "this requirement"}.\n\nCould you please point me to the official guidance that applies?\n\nThank you.`;
+    return wait(
+      {
+        business_id: DEMO_ID,
+        profile_version: profile.profile_version,
+        requirement_id: requirementId,
+        recipient_hint: "The relevant registration, tax, or employment authority",
+        subject,
+        body,
+        action_url: null,
+        disclaimer: "Draft only. etika does not send email or provide legal advice.",
+      },
+      250,
+    );
   },
   answerFacts: (_: string, answers: FactAnswers) => {
     for (const [key, value] of Object.entries(answers.facts ?? {})) profile.facts[key] = { value, confirmed: true };

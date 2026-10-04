@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.cache import with_cache
 from app.agents.orchestrator import Orchestrator, get_trace
+from app.agents.retrieval_adapter import kb_version
 from app.agents.schemas import AssessmentResponse
 from app.contracts.facts import DEFAULT_SEGMENT_ID
 from app.contracts.registry import Requirement
@@ -53,7 +54,19 @@ async def assess(
         live = await Orchestrator(services, generate, generate_structured).assess(session, profile)
     except LLMNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return with_cache(session, profile, live, use_stubs=get_settings().use_stubs)
+    # A cache hit is safe only for the exact knowledge-base revision that produced it. If TiDB
+    # cannot provide that revision, return the live result rather than risk showing stale advice.
+    try:
+        knowledge_base_version = kb_version(services.retrieval)
+    except Exception:  # noqa: BLE001 - cache availability must not break an assessment response
+        knowledge_base_version = None
+    return with_cache(
+        session,
+        profile,
+        live,
+        use_stubs=get_settings().use_stubs,
+        knowledge_base_version=knowledge_base_version,
+    )
 
 
 @router.get("/assessments/{assessment_id}/trace")

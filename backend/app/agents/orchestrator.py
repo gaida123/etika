@@ -35,6 +35,7 @@ from app.contracts.trace import AgentTraceEntry
 from app.core.llm import ContentGenerator, StructuredGenerator
 from app.core.models import AgentRunRow, FindingRow
 from app.core.services import Services
+from app.core.settings import get_settings
 
 LOW_CONFIDENCE = 0.6
 LOW_CONFIDENCE_FLAG = "Low confidence: check with a professional."
@@ -91,17 +92,28 @@ class Orchestrator:
         applicability = self.services.applicability.evaluate(profile)
         planned = self.plan(profile, applicability)
 
+        # Tests/stubs should stay fast. Live requests offset starts slightly so the three
+        # specialist reports do not hit Gemini in the exact same instant.
+        stagger_seconds = 0.0 if get_settings().use_stubs else get_settings().agent_start_stagger_seconds
         plan_entry = AgentTraceEntry(
             assessment_id=assessment_id,
             agent="orchestrator",
             step=0,
             tool_name="plan",
-            tool_input={"profile_version": profile.profile_version},
+            tool_input={"profile_version": profile.profile_version, "agent_start_stagger_seconds": stagger_seconds},
             tool_output_summary="running "
             + ", ".join(f"{a.name}" + (f" ({m})" if m else "") for a, _, m in planned),
         )
+
+        async def run_staggered(
+            index: int, agent: BaseAgent, scope: list[ApplicabilityResult], mode: str | None
+        ) -> AgentRunOutput:
+            if index and stagger_seconds > 0:
+                await asyncio.sleep(stagger_seconds * index)
+            return await agent.run(assessment_id, profile, scope, mode)
+
         outputs: list[AgentRunOutput] = await asyncio.gather(
-            *(agent.run(assessment_id, profile, scope, mode) for agent, scope, mode in planned)
+            *(run_staggered(index, agent, scope, mode) for index, (agent, scope, mode) in enumerate(planned))
         )
 
         findings: list[Finding] = []

@@ -18,11 +18,15 @@ from app.contracts.facts import BusinessProfile
 from app.core.models import AssessmentCacheRow
 
 
-def profile_fingerprint(profile: BusinessProfile, use_stubs: bool) -> str:
+def profile_fingerprint(
+    profile: BusinessProfile, use_stubs: bool, knowledge_base_version: str | None = "unknown"
+) -> str:
     """sha256 of the profile content that can change an assessment.
 
     Excludes ``business_id`` and ``profile_version`` so identical facts (e.g. a fresh demo load)
     share an entry. Facts with no value and no confirmation are treated as absent (both unknown).
+    The retrieval corpus version is part of the key: a cached explanation must never be reused
+    after the official evidence it was grounded in has changed.
     """
     canonical = {
         "legal_name": profile.legal_name,
@@ -39,6 +43,7 @@ def profile_fingerprint(profile: BusinessProfile, use_stubs: bool) -> str:
             for entry in sorted(profile.monthly_revenue, key=lambda e: e.month)
         ],
         "use_stubs": use_stubs,
+        "knowledge_base_version": knowledge_base_version,
     }
     payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -73,10 +78,19 @@ def load(session: Session, fingerprint: str) -> tuple[AssessmentResponse, dateti
 
 
 def with_cache(
-    session: Session, profile: BusinessProfile, live: AssessmentResponse, use_stubs: bool
+    session: Session,
+    profile: BusinessProfile,
+    live: AssessmentResponse,
+    use_stubs: bool,
+    knowledge_base_version: str | None = "unknown",
 ) -> AssessmentResponse:
     """Save a fully successful live result; if any agent failed, prefer the cached full result."""
-    fingerprint = profile_fingerprint(profile, use_stubs)
+    # If the live corpus cannot identify itself, serving an old response would be less safe than
+    # returning the current incomplete response. This is intentionally a cache miss, not a
+    # best-effort guess.
+    if not knowledge_base_version:
+        return live
+    fingerprint = profile_fingerprint(profile, use_stubs, knowledge_base_version)
     if all_agents_succeeded(live):
         save(session, fingerprint, live)
         return live

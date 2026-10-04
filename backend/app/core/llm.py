@@ -1,7 +1,5 @@
 """Thin Gemini wrapper. The model name always comes from GEMINI_MODEL."""
 
-import asyncio
-import logging
 from functools import lru_cache
 from typing import Protocol, TypeVar
 
@@ -11,16 +9,9 @@ from pydantic import BaseModel
 
 from app.core.settings import get_settings
 
-log = logging.getLogger(__name__)
-
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_TEMPERATURE = 0.1
-MAX_ATTEMPTS = 5
-BASE_DELAY_SECONDS = 2.0
-RETRYABLE_CODES = {429, 503}
-SWITCH_AFTER_503 = 2
-MAX_RETRY_AFTER_SECONDS = 60.0
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -47,53 +38,34 @@ def get_client() -> genai.Client:
     api_key = get_settings().gemini_api_key
     if not api_key:
         raise LLMNotConfiguredError("GEMINI_API_KEY is not set")
-    return genai.Client(api_key=api_key)
+    # The SDK otherwise retries 429/5xx responses five times (up to 60 seconds
+    # apart). Browser-facing assessments must return a safe degraded result
+    # promptly instead of letting the Next proxy time out first.
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(
+            timeout=get_settings().gemini_request_timeout_ms,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        ),
+    )
 
 
 async def generate_content(
     contents: str | list[types.Content], config: types.GenerateContentConfig
 ) -> types.GenerateContentResponse:
-    """Call Gemini with retries.
+    """Call Gemini once.
 
-    Retries with exponential backoff on rate-limit (429) and overload (503) errors. After
-    ``SWITCH_AFTER_503`` overload errors on GEMINI_MODEL, remaining attempts use
-    GEMINI_FALLBACK_MODEL (if set).
+    Interactive requests fail provider errors immediately. The client is
+    configured with one attempt, and the agent layer turns a failure into an
+    explicit unavailable flag while preserving the deterministic applicability,
+    score, and retrieval results.
     """
     client = get_client()
-    settings = get_settings()
-    model = settings.gemini_model
-    overloads = 0
-
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        try:
-            return await client.aio.models.generate_content(model=model, contents=contents, config=config)
-        except errors.APIError as exc:
-            if exc.code not in RETRYABLE_CODES or attempt == MAX_ATTEMPTS:
-                raise
-            if exc.code == 503:
-                overloads += 1
-            fallback = settings.gemini_fallback_model
-            if overloads >= SWITCH_AFTER_503 and fallback and model != fallback:
-                log.warning("Gemini %s overloaded; switching to fallback %s", model, fallback)
-                model = fallback
-                continue
-            delay = max(BASE_DELAY_SECONDS * 2 ** (attempt - 1), min(retry_after(exc) or 0.0, MAX_RETRY_AFTER_SECONDS))
-            log.warning("Gemini %s %s on attempt %d; retrying in %.0fs", model, exc.code, attempt, delay)
-            await asyncio.sleep(delay)
-    raise AssertionError("unreachable")
-
-
-def retry_after(exc: errors.APIError) -> float | None:
-    """Seconds Gemini asked us to wait (RetryInfo.retryDelay, e.g. "46s"), if it said."""
-    details = exc.details.get("error", {}).get("details", []) if isinstance(exc.details, dict) else []
-    for item in details:
-        delay = item.get("retryDelay") if isinstance(item, dict) else None
-        if isinstance(delay, str) and delay.endswith("s"):
-            try:
-                return float(delay[:-1])
-            except ValueError:
-                return None
-    return None
+    return await client.aio.models.generate_content(
+        model=get_settings().gemini_model,
+        contents=contents,
+        config=config,
+    )
 
 
 def describe_error(exc: BaseException) -> str:
