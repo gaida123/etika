@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./reegal.db"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
+    gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables
     gemini_embedding_model: str = "gemini-embedding-001"
     use_stubs: bool = True
 
