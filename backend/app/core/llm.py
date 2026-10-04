@@ -2,6 +2,7 @@
 
 import asyncio
 from functools import lru_cache
+import itertools
 import logging
 import random
 from typing import Protocol, TypeVar
@@ -26,6 +27,18 @@ MAX_RETRY_DELAY_SECONDS = 8.0
 RETRY_JITTER_SECONDS = 0.5
 
 logger = logging.getLogger(__name__)
+
+# Every billable Gemini request is counted here so a run's real cost is visible in the log
+# rather than inferred from the trace. Retries count: they are separate requests against the
+# same quota. Embeddings count too (see ``app.knowledge.embeddings``).
+_request_counter = itertools.count(1)
+
+
+def count_request(kind: str, model: str) -> int:
+    """Log one outgoing Gemini request and return its running sequence number."""
+    seq = next(_request_counter)
+    logger.info("gemini request #%s kind=%s model=%s", seq, kind, model)
+    return seq
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -86,6 +99,7 @@ async def generate_content(
             and settings.gemini_fallback_model != settings.gemini_model
         )
         model = settings.gemini_fallback_model if use_fallback else settings.gemini_model
+        count_request("generate", model)
         try:
             return await client.aio.models.generate_content(
                 model=model,

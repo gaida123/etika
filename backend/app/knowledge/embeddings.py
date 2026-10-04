@@ -8,7 +8,7 @@ from typing import Protocol
 
 from google.genai import errors, types
 
-from app.core.llm import LLMNotConfiguredError, get_client
+from app.core.llm import LLMNotConfiguredError, count_request, get_client
 from app.core.settings import get_settings
 
 
@@ -54,6 +54,7 @@ class GeminiEmbeddingService:
         cleaned = [item.strip() for item in texts]
         if not cleaned or any(not item for item in cleaned):
             raise ValueError("embedding input must contain non-empty text")
+        count_request("embed", self._model)
         try:
             response = get_client().models.embed_content(
                 model=self._model,
