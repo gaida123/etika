@@ -18,9 +18,8 @@ class Ping(BaseModel):
 class FakeModels:
     """Raises the queued errors in order, then returns a valid response; records models used."""
 
-    def __init__(self, failures: list[int], retry_delay: str | None = None) -> None:
+    def __init__(self, failures: list[int]) -> None:
         self.failures = list(failures)
-        self.retry_delay = retry_delay
         self.models_called: list[str] = []
         self.sleeps: list[float] = []
 
@@ -28,21 +27,24 @@ class FakeModels:
         self.models_called.append(model)
         if self.failures:
             code = self.failures.pop(0)
-            details = [{"@type": "RetryInfo", "retryDelay": self.retry_delay}] if self.retry_delay else []
-            raise errors.APIError(
-                code, {"error": {"code": code, "message": "fake", "status": "FAKE", "details": details}}
-            )
+            raise errors.APIError(code, {"error": {"code": code, "message": "fake", "status": "FAKE"}})
         return SimpleNamespace(text='{"ok": true}')
 
 
 @pytest.fixture
 def fake(monkeypatch: pytest.MonkeyPatch) -> Any:
-    def install(failures: list[int], fallback: str = "fallback-model", retry_delay: str | None = None) -> FakeModels:
-        models = FakeModels(failures, retry_delay)
+    def install(failures: list[int]) -> FakeModels:
+        models = FakeModels(failures)
         client = SimpleNamespace(aio=SimpleNamespace(models=models))
-        settings = Settings(gemini_api_key="x", gemini_model="primary-model", gemini_fallback_model=fallback)
+        settings = Settings(gemini_api_key="x", gemini_model="primary-model", gemini_fallback_model="fallback-model")
         monkeypatch.setattr(llm, "get_client", lambda: client)
         monkeypatch.setattr(llm, "get_settings", lambda: settings)
+
+        async def record_sleep(delay: float) -> None:
+            models.sleeps.append(delay)
+
+        monkeypatch.setattr(llm.asyncio, "sleep", record_sleep)
+        monkeypatch.setattr(llm.random, "uniform", lambda _start, _end: 0.0)
 
         return models
 
@@ -65,43 +67,33 @@ def test_client_disables_sdk_retries_and_sets_interactive_timeout(monkeypatch: p
     assert options.retry_options.attempts == 1
 
 
-async def test_503_fails_immediately_so_interactive_requests_do_not_time_out(fake: Any) -> None:
-    models = fake([503, 503])
+@pytest.mark.parametrize("status_code", [429, 503])
+async def test_transient_errors_retry_then_return_a_valid_response(fake: Any, status_code: int) -> None:
+    models = fake([status_code, status_code])
+
+    result = await llm.generate_structured("p", "s", Ping)
+
+    assert result == Ping(ok=True)
+    assert models.models_called == ["primary-model", "primary-model", "primary-model"]
+    assert models.sleeps == [2.0, 4.0]
+
+
+@pytest.mark.parametrize("status_code", [429, 503])
+async def test_transient_errors_stop_after_the_bounded_retry_budget(fake: Any, status_code: int) -> None:
+    models = fake([status_code, status_code, status_code, status_code])
+
     with pytest.raises(errors.APIError):
         await llm.generate_structured("p", "s", Ping)
-    assert models.models_called == ["primary-model"]
-    assert models.sleeps == []
+
+    # Final attempt uses fallback model; all four attempts are exhausted.
+    assert models.models_called == ["primary-model", "primary-model", "primary-model", "fallback-model"]
+    assert models.sleeps == [2.0, 4.0, 8.0]
 
 
-async def test_429_fails_immediately_so_interactive_requests_do_not_time_out(fake: Any) -> None:
-    models = fake([429, 429])
-    with pytest.raises(errors.APIError):
-        await llm.generate_structured("p", "s", Ping)
-    assert models.models_called == ["primary-model"]
-    assert models.sleeps == []
-
-
-async def test_provider_errors_never_sleep_in_an_interactive_request(fake: Any) -> None:
-    models = fake([503], retry_delay="46.5s")
-    with pytest.raises(errors.APIError):
-        await llm.generate_structured("p", "s", Ping)
-    assert models.sleeps == []
-
-    models = fake([503], retry_delay="300s")
-    with pytest.raises(errors.APIError):
-        await llm.generate_structured("p", "s", Ping)
-    assert models.sleeps == []
-
-
-async def test_provider_error_fails_immediately_with_fallback_disabled(fake: Any) -> None:
-    models = fake([503, 503], fallback="")
-    with pytest.raises(errors.APIError):
-        await llm.generate_structured("p", "s", Ping)
-    assert models.models_called == ["primary-model"]
-
-
-async def test_non_retryable_error_raises_immediately(fake: Any) -> None:
-    models = fake([400])
+@pytest.mark.parametrize("status_code", [400, 504])
+async def test_non_retryable_error_raises_immediately(fake: Any, status_code: int) -> None:
+    models = fake([status_code])
     with pytest.raises(errors.APIError):
         await llm.generate_structured("p", "s", Ping)
     assert len(models.models_called) == 1
+    assert models.sleeps == []
