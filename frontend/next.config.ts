@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
   // both in development so Next can load its client resources and hydrate the
   // intake wizard rather than falling back to native form submission.
   allowedDevOrigins: ["localhost", "127.0.0.1"],
+  // No floating Next.js badge in the corner during development.
+  devIndicators: false,
   // Keep Next's resolver and production-file tracing inside this independently
   // deployable frontend. A parent-directory package lock must not change either.
   turbopack: {
