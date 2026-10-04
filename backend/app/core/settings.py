@@ -20,8 +20,8 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./etika.db"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash"
-    gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_fallback_model: str = "gemini-3.8-flash"  # used after repeated 503s; empty disables
     # Report prompts carry several cited evidence chunks, so give one provider request
     # enough time to complete. Transient 429/503 recovery remains independently bounded
     # in ``app.core.llm``.
