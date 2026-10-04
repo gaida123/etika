@@ -111,6 +111,7 @@ def test_agent_failure_degrades_gracefully(client: TestClient) -> None:
     findings = {f["requirement_id"]: f for f in body["findings"]}
     assert findings["TAX-01"]["flags"] == [AGENT_UNAVAILABLE_FLAG]
     assert findings["REG-01"]["claims"]  # other agents unaffected
+    assert body["cached"] is False  # nothing cached yet for these facts
 
 
 # --- agent loop -------------------------------------------------------------------------------
