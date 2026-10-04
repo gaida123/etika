@@ -111,6 +111,16 @@ class AgentRunRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class AssessmentCacheRow(Base):
+    """Last fully successful assessment per profile fingerprint, served when Gemini fails."""
+
+    __tablename__ = "assessment_cache"
+
+    fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    response: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ConversationRow(Base):
     """One chat turn with its grounding and any proposed fact update."""
 
