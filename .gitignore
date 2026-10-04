@@ -5,3 +5,7 @@ __pycache__/
 *.db
 .pytest_cache/
 *.egg-info/
+.claude/
+tmp/
+node_modules/
+.next/
