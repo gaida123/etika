@@ -16,11 +16,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   // Once the check is ready, any navigation leaves the check screen for the page asked for.
   const leaveCheck = run?.ready ? closeCheck : undefined;
+  // Ask etika is a window-height frame on wide screens; the column it sits in must not grow past
+  // the window, so the demo banner and the chat share the height instead of stacking past it.
+  const framed = !run && path.endsWith("/ask");
 
   return (
     <div className="shell">
       <AppSidebar run={run} onNavigate={leaveCheck} />
-      <div className="content">
+      <div className={`content ${framed ? "lg:flex lg:h-dvh lg:flex-col lg:overflow-hidden" : ""}`}>
         {isDemo && (
           <div className="border-b border-line bg-brand-tint px-5 py-2.5 text-sm text-brand" role="note">
             Sample data for previewing the design. Nothing here comes from the backend or official sources.

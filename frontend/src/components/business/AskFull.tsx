@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
 import { LogoMark } from "@/components/ui";
 import { isRealUrl, kindOf, priorityPill, statusText } from "@/lib/assessment";
 import { useBusiness } from "./BusinessProvider";
@@ -19,9 +20,38 @@ export function AskFull({ topic }: { topic: string | null }) {
     ? rows.filter((r) => r.area === topicRow.area)
     : rows.filter((r) => kindOf(r, marks) === "action").slice(0, 4);
 
+  // Keep the newest message in view while the reader is at the bottom. Answers fade in and grow
+  // after the turn updates, so follow the content's size, not just the turn list. Scrolling up to
+  // reread stops the follow; asking a new question resumes it.
+  const threadRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  useEffect(() => {
+    const el = threadRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return;
+    const onScroll = () => {
+      follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+    const observer = new ResizeObserver(() => {
+      if (follow.current) el.scrollTop = el.scrollHeight;
+    });
+    el.addEventListener("scroll", onScroll, { passive: true });
+    observer.observe(content);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+    };
+  }, []);
+  useEffect(() => {
+    follow.current = true;
+  }, [turns.length]);
+
+  // On wide screens the page is a window-height frame: the conversation scrolls inside it and the
+  // composer stays pinned at the bottom. Narrow screens scroll normally with a sticky composer.
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line-soft px-8 py-5 max-[720px]:px-4">
+    <div className="flex min-h-screen flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-line-soft px-8 py-5 max-[720px]:px-4">
         <div className="min-w-0 flex-[1_1_320px]">
           <h1 className="m-0 text-[28px] leading-[1.15] font-medium tracking-[-0.03em]">Ask etika</h1>
           <p className="muted mt-1 mb-0 text-sm">Answers use only the official sources we hold. Not legal advice.</p>
@@ -51,42 +81,47 @@ export function AskFull({ topic }: { topic: string | null }) {
         )}
       </header>
 
-      <div className="flex flex-1 flex-wrap items-stretch">
-        <main className="flex min-w-0 flex-[999_1_520px] flex-col">
-          <div className="mx-auto flex w-full max-w-[780px] flex-1 flex-col gap-6 px-8 pt-8 pb-6 max-[720px]:px-4">
-            {turns.length === 0 && (
-              <div className="flex items-start gap-3">
-                <LogoMark size={20} className="mt-[3px]" />
-                <p className="m-0">
-                  Ask about registering, tax or hiring for your business. Every answer cites the official source it
-                  came from, and if we can&apos;t find one we&apos;ll say so.
-                </p>
-              </div>
-            )}
-            <ChatThread turns={turns} variant="full" />
+      <div className="flex flex-1 flex-wrap items-stretch lg:min-h-0 lg:flex-nowrap">
+        <main className="flex min-w-0 flex-[999_1_520px] flex-col lg:min-h-0">
+          <div ref={threadRef} className="flex-1 lg:min-h-0 lg:overflow-y-auto">
+            <div ref={contentRef} className="mx-auto flex w-full max-w-[780px] flex-col gap-6 px-8 pt-8 pb-6 max-[720px]:px-4">
+              {turns.length === 0 && (
+                <div className="flex items-start gap-3">
+                  <LogoMark size={20} className="mt-[3px]" />
+                  <p className="m-0">
+                    Ask about registering, tax or hiring for your business. Every answer cites the official source it
+                    came from, and if we can&apos;t find one we&apos;ll say so.
+                  </p>
+                </div>
+              )}
+              <ChatThread turns={turns} variant="full" />
+            </div>
           </div>
 
-          <div className="mx-auto flex w-full max-w-[780px] flex-col gap-3 px-8 pb-8 max-[720px]:px-4">
-            <Suggestions items={topicRow ? SUGGESTIONS_TOPIC : SUGGESTIONS_GENERAL} topic={topicRow ? topic : null} />
-            <Composer
-              topic={topicRow ? topic : null}
-              variant="full"
-              placeholder={
-                topicRow
-                  ? "Ask about this requirement, or clear the topic to ask about anything…"
-                  : "Ask about your business…"
-              }
-            />
+          <div className="sticky bottom-0 shrink-0 border-t border-line-soft bg-white lg:static">
+            <div className="mx-auto flex w-full max-w-[780px] flex-col gap-3 px-8 pt-4 pb-6 max-[720px]:px-4">
+              <Suggestions items={topicRow ? SUGGESTIONS_TOPIC : SUGGESTIONS_GENERAL} topic={topicRow ? topic : null} />
+              <Composer
+                topic={topicRow ? topic : null}
+                variant="full"
+                placeholder={
+                  topicRow
+                    ? "Ask about this requirement, or clear the topic to ask about anything…"
+                    : "Ask about your business…"
+                }
+              />
+            </div>
           </div>
         </main>
 
         <aside
           aria-labelledby="src-h"
-          className="flex min-w-0 flex-[1_1_280px] flex-col gap-6 border-l border-line-soft bg-panel px-6 py-7"
+          className="flex min-w-0 flex-[1_1_280px] flex-col gap-6 border-l border-line-soft bg-panel px-6 pb-7 lg:max-w-[380px] lg:overflow-y-auto"
         >
           <section className="flex flex-col gap-2.5">
-            <h2 id="src-h" className="m-0 text-base font-medium">
+            <h2 id="src-h" className="sticky top-0 z-10 m-0 flex items-baseline justify-between bg-panel pt-7 pb-1 text-base font-medium">
               Sources in this conversation
+              {sources.length > 0 && <span className="muted text-[13px] font-normal">{sources.length}</span>}
             </h2>
             {sources.length === 0 ? (
               <p className="muted m-0 text-[13px]">Sources cited in answers show up here.</p>
@@ -108,7 +143,9 @@ export function AskFull({ topic }: { topic: string | null }) {
           </section>
           {related.length > 0 && (
             <section className="flex flex-col gap-2.5">
-              <h2 className="m-0 text-base font-medium">{topicRow ? "Related requirements" : "Your open requirements"}</h2>
+              <h2 className="sticky top-0 z-10 m-0 bg-panel pt-3 pb-1 text-base font-medium">
+                {topicRow ? "Related requirements" : "Your open requirements"}
+              </h2>
               {related.map((r) => {
                 const kind = kindOf(r, marks);
                 const pri = priorityPill(r, kind);
