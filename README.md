@@ -46,32 +46,59 @@ Mention a change in chat, like *"I've hired a helper"*, and Etika **proposes** a
 ## How it works
 
 ```
-Intake wizard (Next.js)
+ Intake wizard (Next.js)
         │  facts the owner confirmed (unanswered ≠ false)
         ▼
-FastAPI  ──►  versioned business profile in TiDB
+ FastAPI ──► versioned business profile in TiDB
         │
         ▼
-Deterministic engine (pure Python, no model)
-   applicability  ·  PST/GST calculators  ·  scoring  ·  Now/Next/Later sequencing
-        │  decides WHICH requirements apply and their status
-        ▼
-Orchestrator ──► 3 specialist agents, in parallel
-   per agent:  finding cache ─hit─► reuse the drafted finding (0 Gemini calls)
-                   │ miss
-                   ▼
-              code prefetch: TiDB vector search for every requirement (1 batched embedding call)
-                   ▼
-              ONE Gemini call → drafted findings, each claim cites chunk IDs
-                   ▼
-              citation filter: drop any claim citing a chunk not retrieved in THIS run
+ Deterministic engine (pure Python, no model)
+   applicability · PST/GST calculators · scoring · Now/Next/Later
+   decides WHICH requirements apply and their status
         │
         ▼
-Assessment: score, columns, findings, sources, specialist summaries ──► dashboard
+ Orchestrator ── splits the 13 requirements by area and launches all 3 agents at once
         │
-        ▼
-Ask etika: route → retrieve → ONE Gemini call → citation filter → answer (+ proposed facts to confirm)
+        ├───────────────────────────┬───────────────────────────┐
+        ▼  (in parallel)            ▼                           ▼
+ ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
+ │ REGISTRATION AGENT  │  │      TAX AGENT      │  │    EMPLOYER AGENT   │
+ │ "The Registrar"     │  │   "The Counter"     │  │    "The Foreman"    │
+ │ REG-01 · 02 · 03    │  │ TAX-01 · 02 · 03 ·04│  │ EMP-01 · 02 · 03 ·  │
+ │ (3 requirements)    │  │ (4 requirements)    │  │ 04 · 05 · 06 (6)    │
+ │                     │  │                     │  │                     │
+ │ 1 cache check       │  │ 1 cache check       │  │ 1 cache check       │
+ │ 2 TiDB retrieval    │  │ 2 TiDB retrieval    │  │ 2 TiDB retrieval    │
+ │ 3 ONE Gemini call   │  │ 3 ONE Gemini call   │  │ 3 ONE Gemini call   │
+ │ 4 citation filter   │  │ 4 citation filter   │  │ 4 citation filter   │
+ └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘
+            └────────────────────────┼────────────────────────┘
+                                     ▼  (results merged)
+ Assessment: score · Now/Next/Later · findings · sources · specialist summaries ──► dashboard
+                                     │
+                                     ▼
+ Ask etika: route to ONE agent → retrieve → ONE Gemini call → citation filter
+            → answer (+ any proposed facts, which you confirm)
 ```
+
+### Meet the agents
+
+The three agents are independent and run **concurrently**, so a check takes about as long as the slowest agent, not the sum of all three. Their launches are offset by a few seconds to avoid a burst against Gemini's shared capacity, and every Gemini call goes through the shared rate limiter.
+
+| Agent | Persona | Owns | What it does | Official sources it reads |
+|---|---|---|---|---|
+| **Registration agent** | The Registrar | REG-01 business name, REG-02 City of Vancouver licence, REG-03 CRA business number | Explains which registrations you need and in what order, and why | BC Registries, CRA business number pages |
+| **Tax agent** | The Counter | TAX-01 BC PST, TAX-02 GST, TAX-03 voluntary GST, TAX-04 charging tax | Reports the PST and GST threshold results the calculators produced, and how close your sales are, with any crossing month labelled an estimate | BC Ministry of Finance, CRA |
+| **Employer agent** | The Foreman | EMP-01 WorkSafeBC, EMP-02 CRA payroll, EMP-03 minimum wage, EMP-04 pay statements, EMP-05 payroll records, EMP-06 employee vs contractor | Explains what to set up before a first hire, or what applies now if you already have staff | WorkSafeBC, CRA, BC Employment Standards Branch, BC Laws |
+
+Every agent runs the same four steps:
+
+1. **Cache check.** A requirement whose facts, applicability, corpus revision, prompt and model are all unchanged is answered from the finding cache with **no Gemini call**.
+2. **Retrieval.** For the rest, code searches TiDB for evidence on each requirement. All of an agent's queries go out in one batched embedding call.
+3. **One Gemini call.** The agent writes a cited explanation for each remaining requirement. It never decides applicability, status or numbers.
+4. **Citation filter.** Any claim citing a chunk that wasn't retrieved in this run is dropped.
+
+Each agent also writes one voiced `summary` line in its persona's manner. Personas change wording only, never a status, score or source.
 
 ### The core rule: code decides, Gemini explains
 
