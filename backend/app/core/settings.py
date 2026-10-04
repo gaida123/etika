@@ -20,8 +20,12 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./reegal.db"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.5-flash"
     gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables
+    # Browser-facing runs must finish before the frontend proxy gives up. A failed model
+    # call is safe: the agent is visibly marked unavailable and code still returns the
+    # deterministic applicability assessment.
+    gemini_request_timeout_ms: int = 12_000
     gemini_embedding_model: str = "gemini-embedding-001"
     # The configured model's live probe returned 3072 dimensions. This must match
     # TiDB's VECTOR(D) column and every document/query embedding.
