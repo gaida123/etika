@@ -4,9 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { Logo, LogoMark } from "@/components/ui";
-import { AREAS, confirmedFactCount, kindOf } from "@/lib/assessment";
+import { AREAS, kindOf } from "@/lib/assessment";
 import { useBusiness } from "./BusinessProvider";
 import { type CheckRun, CheckProgress, LaneStatus, useCheckRun } from "./CheckProgress";
+import { useStep } from "./Dashboard";
 import { AreaIcon } from "./icons";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -53,6 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 function AppSidebar({ run, onNavigate }: { run: CheckRun | null; onNavigate?: () => void }) {
   const { businessId, profile, rows, marks, questions } = useBusiness();
   const path = usePathname();
+  const step = useStep();
   const base = `/b/${businessId}`;
   const showCount = !run || run.ready;
   const name = profile?.trading_name || profile?.legal_name || "Your business";
@@ -63,11 +65,25 @@ function AppSidebar({ run, onNavigate }: { run: CheckRun | null; onNavigate?: ()
 
       <nav aria-label="Your check">
         <div className="navh">Your check</div>
-        <NavLink href={base} current={run ? true : path === base} icon={<GridIcon />} onClick={onNavigate}>
-          Overview
+        <NavLink
+          href={`${base}?step=dashboard`}
+          current={!run && path === base && step === "dashboard"}
+          icon={<GridIcon />}
+          onClick={onNavigate}
+        >
+          Dashboard
         </NavLink>
         <NavLink
-          href={`${base}#input`}
+          href={base}
+          current={run ? true : path === base && step !== "dashboard"}
+          icon={<StepsIcon />}
+          onClick={onNavigate}
+        >
+          Walk-through
+        </NavLink>
+        <NavLink
+          href={`${base}/input`}
+          current={!run && path === `${base}/input`}
           icon={<QuestionIcon />}
           count={(showCount && questions.length) || undefined}
           onClick={onNavigate}
@@ -90,7 +106,7 @@ function AppSidebar({ run, onNavigate }: { run: CheckRun | null; onNavigate?: ()
           {run.lanes.map((l) => (
             <NavLink
               key={l.area}
-              href={`${base}#area-${l.area}`}
+              href={`${base}?step=all#area-${l.area}`}
               icon={<AreaIcon area={l.area} />}
               status={<LaneStatus lane={l} />}
               onClick={onNavigate}
@@ -109,7 +125,7 @@ function AppSidebar({ run, onNavigate }: { run: CheckRun | null; onNavigate?: ()
             return (
               <NavLink
                 key={a.id}
-                href={`${base}#area-${a.id}`}
+                href={`${base}?step=all#area-${a.id}`}
                 icon={<AreaIcon area={a.id} />}
                 count={applicable.length ? `${done}/${applicable.length}` : undefined}
               >
@@ -122,29 +138,21 @@ function AppSidebar({ run, onNavigate }: { run: CheckRun | null; onNavigate?: ()
 
       <nav aria-label="Business">
         <div className="navh">Business</div>
-        <NavLink href={`${base}#coverage`} icon={<CoverageIcon />} onClick={onNavigate}>
+        <NavLink href={`${base}?step=coverage`} icon={<CoverageIcon />} onClick={onNavigate}>
           What we cover
         </NavLink>
-        <NavLink href="/" icon={<PlusIcon />}>
+        <NavLink href="/check" icon={<PlusIcon />}>
           Start a new check
         </NavLink>
       </nav>
 
       <div className="mt-auto flex flex-col gap-4">
-        <p className="muted m-0 px-2.5 text-[13px]">etika shows requirements that may apply. It isn&apos;t legal advice.</p>
         <div className="border-t border-opt pt-3">
           <div className="flex min-h-12 items-center gap-2.5 px-2.5 py-1.5">
             <span className="inline-flex size-8 flex-none items-center justify-center rounded-full bg-brand font-medium text-white">
               {name.trim().charAt(0).toUpperCase()}
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{name}</span>
-              {profile && (
-                <span className="muted block text-xs">
-                  Version {profile.profile_version}, {confirmedFactCount(profile)} confirmed facts
-                </span>
-              )}
-            </span>
+            <span className="min-w-0 flex-1 truncate leading-8 font-medium">{name}</span>
           </div>
         </div>
       </div>
@@ -208,7 +216,7 @@ function ErrorState() {
           <button type="button" className="btn btn-p" onClick={retry}>
             Try again
           </button>
-          <Link href="/" className="btn border-step-off">
+          <Link href="/check" className="btn border-step-off">
             Start a new check
           </Link>
         </div>
@@ -232,3 +240,4 @@ const QuestionIcon = () =>
   );
 const CoverageIcon = () => icon(<circle cx="12" cy="12" r="9" />, { strokeDasharray: "3 3" });
 const PlusIcon = () => icon(<path d="M12 5v14M5 12h14" />);
+const StepsIcon = () => icon(<path d="M5 6h2M5 12h2M5 18h2M10 6h9M10 12h9M10 18h9" />);

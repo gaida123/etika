@@ -105,7 +105,7 @@ function Answer({
           </div>
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">What you can do</span>
-            <Link href={`/b/${businessId}#coverage`} className="btn btn-s btn-soft self-start">
+            <Link href={`/b/${businessId}?step=coverage`} className="btn btn-s btn-soft self-start">
               See what etika covers
             </Link>
           </div>

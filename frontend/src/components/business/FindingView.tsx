@@ -139,7 +139,11 @@ export function FindingView({ requirementId }: { requirementId: string }) {
         <Link href={base} className="text-ink underline-offset-[3px]">
           Overview
         </Link>{" "}
-        <span className="muted">/ {areaLabel(row.area)} /</span> {row.title}
+        <span className="muted">/</span>{" "}
+        <Link href={`${base}?step=all#area-${row.area}`} className="text-ink underline-offset-[3px]">
+          {areaLabel(row.area)}
+        </Link>{" "}
+        <span className="muted">/</span> {row.title}
       </nav>
 
       <div className="flex flex-wrap items-start gap-8">
@@ -227,7 +231,7 @@ export function FindingView({ requirementId }: { requirementId: string }) {
                   {factKeys
                     .filter((k) => !known.includes(k))
                     .map((k) => (
-                      <a key={k} href={`${base}#input`} className="pill pill-dash h-8 px-3 font-normal text-ink no-underline">
+                      <a key={k} href={`${base}/input`} className="pill pill-dash h-8 px-3 font-normal text-ink no-underline">
                         Needs your input: {factField(k)}
                       </a>
                     ))}
