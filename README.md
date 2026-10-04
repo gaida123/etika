@@ -11,6 +11,8 @@ A friend spent a whole weekend working out whether her candle business needed to
 
 So we built Etika.
 
+**Under the hood, Etika is a RAG pipeline we built ourselves on TiDB:** we scraped and curated official data from multiple government sources (BC Registries, the CRA, BC Ministry of Finance, WorkSafeBC, the BC Employment Standards Branch and BC Laws), chunked and embedded it into TiDB's vector store, and every answer is retrieved from it and cited back to the source.
+
 ---
 
 ## What is Etika?
@@ -102,9 +104,9 @@ Scoring only counts **required-now legal obligations**, weighted by the registry
 
 ## The RAG pipeline
 
-We built the whole source-to-citation process ourselves.
+We built the whole source-to-citation process ourselves: a RAG pipeline on **TiDB**, fed by data we **scraped from multiple government sources**.
 
-1. **Collect.** Official pages were gathered by hand from BC Registries, the CRA, BC Ministry of Finance, WorkSafeBC, the BC Employment Standards Branch and BC Laws.
+1. **Scrape and collect.** Official pages were scraped and curated from BC Registries, the CRA, BC Ministry of Finance, WorkSafeBC, the BC Employment Standards Branch and BC Laws.
 2. **Chunk by legal section.** Each page is split along its section structure, keeping its `section_path`, authority, URL, effective dates and source version.
 3. **Embed.** Every chunk is embedded with `gemini-embedding-001` (3,072 dimensions) and stored beside its metadata in **TiDB's vector column**, so relational filters and vector search share one store.
 4. **Gate.** Retrieval only returns chunks that are current, effective on the date asked, mapped to the requirement being checked, and (outside the demo) marked **reviewed and approved** by the research owner. Nothing unreviewed is allowed to be cited in production mode.
@@ -142,7 +144,7 @@ Each agent has an original character, **The Registrar**, **The Counter** and **T
 ## What we built
 
 - A **FastAPI backend** with versioned profiles, an intake parser, a deterministic rules engine, a three-agent orchestrator, grounded chat, an agent trace and a finding cache.
-- A **TiDB knowledge base** of 240 embedded chunks from 19 official sources, with a review-gated retrieval service and a lexical fallback.
+- A **RAG pipeline on TiDB**: data scraped from multiple government sources, chunked by legal section and embedded into **240 chunks from 19 official pages**, with a review-gated retrieval service, strict citation checking and a lexical fallback.
 - A **Next.js frontend**: intake wizard, compliance dashboard, per-requirement pages, the Ask etika chat, specialist cards, an offline demo mode and a full set of favicons and app icons.
 - A **Gemini request layer**: counting every billable request, retries through a shared rate limiter, and a fallback model after repeated 503s.
 - **Tooling**: a registry loader, vector-migration and embedding-backfill scripts, smoke checks, and a **demo prewarm script**.
