@@ -79,10 +79,10 @@ class BaseAgent:
         output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
         toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
         try:
-            await self._investigate(toolbox, profile, mode)
+            await self.investigate(toolbox, self._investigate_prompt(output, profile), mode)
             report = await self.generate_structured(
                 prompt=self._report_prompt(output, profile, mode),
-                system=f"{self._system_prompt(mode)}\n\n{REPORT_RULES}",
+                system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
                 schema=AgentReport,
             )
             output.drafts = report.findings
@@ -92,16 +92,15 @@ class BaseAgent:
             toolbox.log("error", {}, output.error)
         return output
 
-    async def _investigate(self, toolbox: AgentToolbox, profile: BusinessProfile, mode: str | None) -> None:
+    async def investigate(self, toolbox: AgentToolbox, prompt: str, mode: str | None) -> None:
+        """Tool-calling loop (shared by assessment and chat), capped at ``max_tool_calls``."""
         config = types.GenerateContentConfig(
-            system_instruction=self._system_prompt(mode),
+            system_instruction=self.system_prompt(mode),
             temperature=DEFAULT_TEMPERATURE,
             tools=[types.Tool(function_declarations=toolbox.declarations())],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
-        contents: list[types.Content] = [
-            types.Content(role="user", parts=[types.Part(text=self._investigate_prompt(toolbox.output, profile))])
-        ]
+        contents: list[types.Content] = [types.Content(role="user", parts=[types.Part(text=prompt)])]
         calls = 0
         for _ in range(self.max_tool_calls + 1):
             response = await self.generate(contents, config)
@@ -126,7 +125,8 @@ class BaseAgent:
 
     # --- prompts ------------------------------------------------------------------------------
 
-    def _system_prompt(self, mode: str | None) -> str:
+    def system_prompt(self, mode: str | None) -> str:
+        """Specialist system prompt, shared by assessment and chat."""
         parts = [
             f"You are the {self.title} for a compliance navigator used by new sole proprietors in "
             "Vancouver, BC. You explain requirements using official evidence only.",
@@ -146,7 +146,7 @@ class BaseAgent:
             missing = f"; missing facts: {', '.join(a.missing_facts)}" if a.missing_facts else ""
             gray = f"; known gray areas: {'; '.join(req.review_flags)}" if req.review_flags else ""
             lines.append(f"- {req.id} {req.title} [{req.requirement_type}] applicability: {a.status.value}{missing}{gray}")
-        lines += ["", "Owner facts:", _facts_summary(profile), "", "Steps:"]
+        lines += ["", "Owner facts:", facts_summary(profile), "", "Steps:"]
         lines.append("1. Call retrieve_evidence once for each requirement, with a specific query.")
         extra = self.investigate_instructions()
         if extra:
@@ -159,7 +159,7 @@ class BaseAgent:
         return "\n".join(lines)
 
     def _report_prompt(self, output: AgentRunOutput, profile: BusinessProfile, mode: str | None) -> str:
-        lines = [f"Owner facts:\n{_facts_summary(profile)}", ""]
+        lines = [f"Owner facts:\n{facts_summary(profile)}", ""]
         if mode:
             lines += [f"Mode: {mode}", ""]
         for a in output.scope:
@@ -186,7 +186,7 @@ class BaseAgent:
         return "\n".join(lines)
 
 
-def _facts_summary(profile: BusinessProfile) -> str:
+def facts_summary(profile: BusinessProfile) -> str:
     lines = [f"- legal_name: {profile.legal_name or 'unknown'}", f"- trading_name: {profile.trading_name or 'unknown'}"]
     for key, fact in profile.facts.items():
         lines.append(f"- {key}: {fact.value if fact.is_known else 'unknown'}")
