@@ -22,7 +22,20 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables
     gemini_embedding_model: str = "gemini-embedding-001"
+    # The configured model's live probe returned 3072 dimensions. This must match
+    # TiDB's VECTOR(D) column and every document/query embedding.
+    gemini_embedding_dimensions: int = 3072
     use_stubs: bool = True
+    # Lets us exercise the real TiDB corpus while the rest of Developer 1's services
+    # are still stubs. This is a staging switch, not the production cutover switch.
+    use_tidb_retrieval: bool = False
+    # Enable only after the TiDB vector migration and embedding backfill complete.
+    # A transient Gemini 429 still falls back to lexical retrieval per request.
+    use_tidb_semantic_retrieval: bool = False
+    # Development-only corpus gates. Keep both false in a production deployment until
+    # research review and requirement mappings are complete.
+    allow_unreviewed_knowledge: bool = False
+    allow_candidate_requirement_mappings: bool = False
 
 
 @lru_cache
