@@ -7,6 +7,7 @@ import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, us
 import {
   ApiError,
   type Assessment,
+  type AgentTraceEntry,
   type BusinessProfile,
   type ChatResponse,
   type FactAnswers,
@@ -35,6 +36,7 @@ type Ctx = {
   isDemo: boolean;
   profile: BusinessProfile | null;
   assessment: Assessment | null;
+  trace: AgentTraceEntry[];
   rows: Row[];
   questions: FollowUpQuestion[];
   phase: "loading" | "assessing" | "ready" | "error";
@@ -59,7 +61,13 @@ export function useBusiness(): Ctx {
   return ctx;
 }
 
-type Cached = { version: number; assessment: Assessment; questions: FollowUpQuestion[] };
+type Cached = {
+  version: number;
+  assessment: Assessment;
+  questions: FollowUpQuestion[];
+  /** Optional so existing browser caches stay valid after trace support ships. */
+  trace?: AgentTraceEntry[];
+};
 const cacheKey = (id: string) => `etika:assessment:${id}`;
 
 function readCache(id: string): Cached | null {
@@ -86,6 +94,7 @@ const message = (e: unknown) => (e instanceof ApiError ? e.message : "Something 
 export function BusinessProvider({ businessId, children }: { businessId: string; children: ReactNode }) {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [trace, setTrace] = useState<AgentTraceEntry[]>([]);
   const [questions, setQuestions] = useState<FollowUpQuestion[]>([]);
   const [phase, setPhase] = useState<Ctx["phase"]>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -97,10 +106,15 @@ export function BusinessProvider({ businessId, children }: { businessId: string;
 
   const assess = useCallback(
     async (p: BusinessProfile) => {
-      const [a, q] = await Promise.all([backend.runAssessment(businessId), backend.getQuestions(businessId)]);
+      const assessmentPromise = backend.runAssessment(businessId);
+      const questionsPromise = backend.getQuestions(businessId);
+      const a = await assessmentPromise;
+      // A trace makes the agent work inspectable, but it must never hide an otherwise usable assessment.
+      const [q, nextTrace] = await Promise.all([questionsPromise, backend.getAssessmentTrace(a.assessment_id).catch(() => [])]);
       setAssessment(a);
+      setTrace(nextTrace);
       setQuestions(q);
-      writeCache(businessId, { version: p.profile_version, assessment: a, questions: q });
+      writeCache(businessId, { version: p.profile_version, assessment: a, questions: q, trace: nextTrace });
     },
     [backend, businessId],
   );
@@ -116,6 +130,13 @@ export function BusinessProvider({ businessId, children }: { businessId: string;
         if (cached?.version === p.profile_version) {
           setAssessment(cached.assessment);
           setQuestions(cached.questions);
+          setTrace(cached.trace ?? []);
+          if (!cached.trace) {
+            backend.getAssessmentTrace(cached.assessment.assessment_id).then(
+              (cachedTrace) => !cancelled && setTrace(cachedTrace),
+              () => undefined,
+            );
+          }
         } else {
           setPhase("assessing");
           await assess(p);
@@ -195,6 +216,7 @@ export function BusinessProvider({ businessId, children }: { businessId: string;
     isDemo: businessId === DEMO_ID,
     profile,
     assessment,
+    trace,
     rows,
     questions,
     phase,

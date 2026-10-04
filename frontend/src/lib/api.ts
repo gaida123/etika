@@ -92,12 +92,24 @@ export type RequirementDetail = {
     required_fact_keys: string[];
     depends_on: string[];
     priority: Priority;
-    action_url: string;
+    /** Official page or form from the reviewed registry. Never a placeholder. */
+    action_url: string | null;
     preparation_items: string[];
     review_flags: string[];
     last_verified_at: string | null;
   };
   evidence: { status: "supported" | "insufficient_evidence"; chunks: RetrievedChunk[]; limitations: string[] };
+};
+
+/** One persisted, human-readable agent action from an assessment run. */
+export type AgentTraceEntry = {
+  assessment_id: string;
+  agent: string;
+  step: number;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_output_summary: string;
+  created_at: string;
 };
 
 export type ProposedFact = { key: string; value: unknown; confidence: number; evidence: string };
@@ -148,6 +160,11 @@ const post = (body?: unknown): RequestInit => ({
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
+const patch = (body: unknown): RequestInit => ({
+  method: "PATCH",
+  body: JSON.stringify(body),
+});
+
 export const createProfile = (body: ProfileCreate) => request<BusinessProfile>("/profile", post(body));
 
 export const getProfile = (businessId: string) => request<BusinessProfile>(`/profile/${businessId}`);
@@ -159,13 +176,35 @@ export const getQuestions = (businessId: string) =>
 
 export const getRequirement = (id: string) => request<RequirementDetail>(`/requirements/${id}`);
 
+export const getAssessmentTrace = (assessmentId: string) =>
+  request<AgentTraceEntry[]>(`/assessments/${assessmentId}/trace`);
+
 export type FactAnswers = {
   facts?: Record<string, unknown>;
   monthly_revenue?: { month: string; amount: number }[];
 };
 
+/** Saves confirmed follow-up answers as a new version of a business profile. */
+export const updateProfile = (businessId: string, body: FactAnswers) =>
+  request<BusinessProfile>(`/profile/${businessId}`, patch(body));
+
 export const askChat = (businessId: string, question: string) =>
   request<ChatResponse>("/chat", post({ business_id: businessId, question }));
+
+export type DraftEmail = {
+  business_id: string;
+  profile_version: number;
+  requirement_id: string;
+  recipient_hint: string;
+  subject: string;
+  body: string;
+  action_url: string | null;
+  disclaimer: string;
+};
+
+/** Prepares an owner-reviewed inquiry; the app never sends it itself. */
+export const draftEmail = (businessId: string, requirementId: string) =>
+  request<DraftEmail>("/draft-email", post({ business_id: businessId, requirement_id: requirementId }));
 
 export const confirmProposal = (
   businessId: string,

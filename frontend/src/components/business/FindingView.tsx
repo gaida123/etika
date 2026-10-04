@@ -5,7 +5,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CheckIcon, LogoMark } from "@/components/ui";
-import { ApiError, type RequirementDetail } from "@/lib/api";
+import { ApiError, type DraftEmail, type RequirementDetail } from "@/lib/api";
 import {
   type Progress,
   appliesPill,
@@ -28,10 +28,24 @@ const PROGRESS: { value: Progress; label: string }[] = [
   { value: "done", label: "Done" },
 ];
 
+type DetailLoad = {
+  requirementId: string;
+  detail: RequirementDetail | null;
+  error: string | null;
+};
+
+type EmailLoad = {
+  requirementId: string;
+  draft: DraftEmail | null;
+  error: string | null;
+};
+
 export function FindingView({ requirementId }: { requirementId: string }) {
   const { backend, businessId, rows, marks, setMark, profile, assessment } = useBusiness();
-  const [detail, setDetail] = useState<RequirementDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailLoad, setDetailLoad] = useState<DetailLoad | null>(null);
+  const [emailLoad, setEmailLoad] = useState<EmailLoad | null>(null);
+  const [creatingEmail, setCreatingEmail] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [ticked, setTicked] = useStored<string[]>(`etika:prep:${businessId}:${requirementId}`, []);
   const base = `/b/${businessId}`;
   const row = rows.find((r) => r.requirement_id === requirementId);
@@ -39,8 +53,14 @@ export function FindingView({ requirementId }: { requirementId: string }) {
   useEffect(() => {
     let cancelled = false;
     backend.getRequirement(requirementId).then(
-      (d) => !cancelled && setDetail(d),
-      (e) => !cancelled && setDetailError(e instanceof ApiError ? e.message : "Couldn't load the official source."),
+      (detail) => !cancelled && setDetailLoad({ requirementId, detail, error: null }),
+      (error) =>
+        !cancelled &&
+        setDetailLoad({
+          requirementId,
+          detail: null,
+          error: error instanceof ApiError ? error.message : "Couldn't load the official source.",
+        }),
     );
     return () => {
       cancelled = true;
@@ -62,6 +82,12 @@ export function FindingView({ requirementId }: { requirementId: string }) {
   const priority = priorityPill(row, kind);
   const finding = assessment.findings.find((f) => f.requirement_id === requirementId);
   const flags = finding?.flags ?? [];
+  // A route transition can retain this client component briefly. Ignore results from the
+  // previous requirement rather than synchronously resetting state in an effect.
+  const detail = detailLoad?.requirementId === requirementId ? detailLoad.detail : null;
+  const detailError = detailLoad?.requirementId === requirementId ? detailLoad.error : null;
+  const email = emailLoad?.requirementId === requirementId ? emailLoad.draft : null;
+  const emailError = emailLoad?.requirementId === requirementId ? emailLoad.error : null;
   const req = detail?.requirement;
   const factKeys = req?.required_fact_keys ?? [];
   const revenueMonths = profile.monthly_revenue?.length ?? 0;
@@ -73,8 +99,39 @@ export function FindingView({ requirementId }: { requirementId: string }) {
   const prep = req?.preparation_items ?? [];
   const verified = shortDate(req?.last_verified_at);
   const actionUrl = row.action_url ?? req?.action_url;
+  const insufficientEvidence = detail?.evidence.status === "insufficient_evidence";
   const chunks = detail?.evidence.status === "supported" ? detail.evidence.chunks.slice(0, 2) : [];
+  const evidenceLimitations = detail?.evidence.limitations ?? [];
   const detailText = detailLine(row);
+  const emailAppUrl = email ? `mailto:?subject=${encodeURIComponent(email.subject)}&body=${encodeURIComponent(email.body)}` : null;
+
+  async function createEmailDraft() {
+    setCreatingEmail(true);
+    setCopyState("idle");
+    setEmailLoad({ requirementId, draft: null, error: null });
+    try {
+      const draft = await backend.draftEmail(businessId, requirementId);
+      setEmailLoad({ requirementId, draft, error: null });
+    } catch (error) {
+      setEmailLoad({
+        requirementId,
+        draft: null,
+        error: error instanceof ApiError ? error.message : "Couldn't prepare the email draft.",
+      });
+    } finally {
+      setCreatingEmail(false);
+    }
+  }
+
+  async function copyEmailDraft() {
+    if (!email) return;
+    try {
+      await navigator.clipboard.writeText(`Subject: ${email.subject}\n\n${email.body}`);
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+  }
 
   return (
     <div className="max-w-[1160px] px-12 pt-10 pb-20 max-[720px]:px-4">
@@ -191,60 +248,130 @@ export function FindingView({ requirementId }: { requirementId: string }) {
                 <div className="sk w-[88%]" />
                 <div className="sk w-[62%]" />
               </div>
+            ) : insufficientEvidence ? (
+              <div className="box flex flex-col gap-2 bg-panel p-5 text-sm" role="status">
+                <strong className="font-medium">Official source not yet available</strong>
+                <p className="m-0">
+                  We couldn&apos;t find approved official evidence for this requirement, so etika can&apos;t confirm it.
+                  Check with the authority or a qualified professional before relying on it.
+                </p>
+                {evidenceLimitations.length > 0 && (
+                  <p className="muted m-0 text-[13px]">{evidenceLimitations.join(" ")}</p>
+                )}
+                <Link href={`${base}#agent-trace`} className="self-start text-[13px] underline-offset-[3px]">
+                  See the agent trace for this assessment
+                </Link>
+              </div>
             ) : chunks.length === 0 ? (
               <div className="box bg-panel p-5 text-sm">
                 We couldn&apos;t find an official source for this. Check with the authority or a professional before
                 relying on it.
               </div>
             ) : (
-              chunks.map((c) => (
-                <figure key={c.chunk_id} className="box m-0 mb-3 flex flex-col gap-3.5 bg-panel p-5">
-                  <blockquote className="m-0 border-l-2 border-brand pl-4">{c.text}</blockquote>
-                  <figcaption className="flex flex-wrap justify-between gap-2 text-sm">
-                    <span>
-                      <strong className="font-medium">{c.title}</strong>
-                      {c.section_path && `, ${c.section_path}`}
-                    </span>
-                    <span className="muted">
-                      {verified ? `Last verified ${verified}` : "Not yet verified"}
-                      {isRealUrl(c.url) && (
-                        <>
-                          {"   "}
-                          <a href={c.url} target="_blank" rel="noreferrer" className="underline-offset-[3px]">
-                            Open official source ↗
-                          </a>
-                        </>
-                      )}
-                    </span>
-                  </figcaption>
-                </figure>
-              ))
+              <>
+                {chunks.map((c) => (
+                  <figure key={c.chunk_id} className="box m-0 mb-3 flex flex-col gap-3.5 bg-panel p-5">
+                    <blockquote className="m-0 border-l-2 border-brand pl-4">{c.text}</blockquote>
+                    <figcaption className="flex flex-wrap justify-between gap-2 text-sm">
+                      <span>
+                        <strong className="font-medium">{c.title}</strong>
+                        {c.section_path && `, ${c.section_path}`}
+                      </span>
+                      <span className="muted">
+                        {verified ? `Last verified ${verified}` : "Not yet verified"}
+                        {isRealUrl(c.url) && (
+                          <>
+                            {"   "}
+                            <a href={c.url} target="_blank" rel="noreferrer" className="underline-offset-[3px]">
+                              Open official source ↗
+                            </a>
+                          </>
+                        )}
+                      </span>
+                    </figcaption>
+                  </figure>
+                ))}
+                <Link href={`${base}#agent-trace`} className="text-sm underline-offset-[3px]">
+                  See the agent trace for this assessment
+                </Link>
+              </>
             )}
           </section>
 
           <section aria-labelledby="step-h" className="box callout flex flex-col gap-3.5 p-6">
             <span className="text-sm font-medium text-brand">Your next step</span>
             <h2 id="step-h" className="m-0 text-2xl font-medium tracking-[-0.02em]">
-              {row.bucket === "now" ? "Start on the official site" : "Get ready before it applies"}
+              {insufficientEvidence
+                ? "Check with the authority"
+                : row.bucket === "now"
+                  ? "Start on the official site"
+                  : "Get ready before it applies"}
             </h2>
+            {insufficientEvidence && (
+              <p className="m-0 text-sm">
+                We don&apos;t show an action link until this requirement has approved official evidence.
+              </p>
+            )}
             <div className="flex flex-wrap gap-2.5">
-              {isRealUrl(actionUrl) ? (
+              {!insufficientEvidence && isRealUrl(actionUrl) ? (
                 <a href={actionUrl} target="_blank" rel="noreferrer" className="btn btn-p">
                   Open official page ↗
                 </a>
-              ) : (
+              ) : !insufficientEvidence ? (
                 <button type="button" className="btn btn-p" disabled>
-                  Official link coming soon
+                  Official action link not available
                 </button>
-              )}
+              ) : null}
               <a href="#chat" className="btn border-step-off">
                 Ask about this
               </a>
+              <button type="button" className="btn border-step-off" disabled={creatingEmail} onClick={createEmailDraft}>
+                {creatingEmail ? "Preparing email…" : "Draft inquiry email"}
+              </button>
             </div>
             <span className="muted text-[13px]">
-              {verified ? `Link verified ${verified}. ` : ""}Opens the official site. etika doesn&apos;t submit anything
-              for you.
+              {insufficientEvidence
+                ? "No official action is shown for an unsupported requirement."
+                : `${verified ? `Link verified ${verified}. ` : ""}Opens the official site. etika doesn&apos;t submit anything for you.`}
             </span>
+            {emailError && (
+              <p className="m-0 text-[13px] text-[#a3341f]" role="alert">
+                {emailError}
+              </p>
+            )}
+            {email && (
+              <div className="flex flex-col gap-2 border-t border-line-soft pt-3 text-sm" role="status">
+                <strong className="font-medium">Inquiry draft ready</strong>
+                <span className="muted">Review it before you send it. etika never sends email for you.</span>
+                <span className="muted">Suggested recipient: {email.recipient_hint}</span>
+                <details>
+                  <summary className="cursor-pointer underline-offset-[3px]">Preview email</summary>
+                  <p className="mt-2 mb-1 font-medium">Subject: {email.subject}</p>
+                  <p className="m-0 whitespace-pre-line">{email.body}</p>
+                </details>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn btn-s btn-soft" onClick={copyEmailDraft}>
+                    {copyState === "copied" ? "Copied" : "Copy draft"}
+                  </button>
+                  {emailAppUrl && (
+                    <a href={emailAppUrl} className="btn btn-s btn-soft">
+                      Open in email app
+                    </a>
+                  )}
+                </div>
+                {copyState === "error" && (
+                  <span className="text-[13px] text-[#a3341f]" role="alert">
+                    Couldn&apos;t copy the draft. Select the preview text instead.
+                  </span>
+                )}
+                {isRealUrl(email.action_url) && (
+                  <a href={email.action_url} target="_blank" rel="noreferrer" className="text-[13px] underline-offset-[3px]">
+                    Open official page ↗
+                  </a>
+                )}
+                <span className="muted text-[13px]">{email.disclaimer}</span>
+              </div>
+            )}
           </section>
 
           {prep.length > 0 && (

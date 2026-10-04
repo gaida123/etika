@@ -1,16 +1,19 @@
 // The data source behind /b/[id]: the FastAPI backend, or sample data for /b/demo.
 
 import {
-  ApiError,
   type BusinessProfile,
+  type DraftEmail,
   type FactAnswers,
   type RequirementDetail,
   askChat,
   confirmProposal,
+  draftEmail,
+  getAssessmentTrace,
   getProfile,
   getQuestions,
   getRequirement,
   runAssessment,
+  updateProfile,
 } from "./api";
 import { DEMO_ID, demoBackend } from "./demo";
 
@@ -19,8 +22,10 @@ export type Backend = {
   runAssessment: typeof runAssessment;
   getQuestions: typeof getQuestions;
   getRequirement: (id: string) => Promise<RequirementDetail>;
+  getAssessmentTrace: typeof getAssessmentTrace;
   askChat: typeof askChat;
   confirmProposal: typeof confirmProposal;
+  draftEmail: (businessId: string, requirementId: string) => Promise<DraftEmail>;
   answerFacts: (businessId: string, answers: FactAnswers) => Promise<BusinessProfile>;
 };
 
@@ -29,11 +34,11 @@ const liveBackend: Backend = {
   runAssessment,
   getQuestions,
   getRequirement,
+  getAssessmentTrace,
   askChat,
   confirmProposal,
-  // The backend has no route for saving a direct answer yet (only proposals from intake or chat).
-  answerFacts: () =>
-    Promise.reject(new ApiError("Saving answers here isn't connected to the backend yet. Tell etika in chat instead.")),
+  draftEmail,
+  answerFacts: updateProfile,
 };
 
 export const backendFor = (businessId: string): Backend => (businessId === DEMO_ID ? demoBackend : liveBackend);

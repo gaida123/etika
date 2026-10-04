@@ -21,12 +21,13 @@ import {
   summarize,
 } from "@/lib/assessment";
 import { useBusiness } from "./BusinessProvider";
+import { AgentTrace } from "./AgentTrace";
 import { FactQuestion } from "./FactQuestion";
 
 type Filter = "all" | "action" | "input" | "done";
 
 export function Dashboard() {
-  const { businessId, profile, assessment, rows, marks, questions, rechecking } = useBusiness();
+  const { businessId, profile, assessment, rows, marks, questions, rechecking, trace } = useBusiness();
   const [filter, setFilter] = useState<Filter>("all");
   if (!assessment || !profile) return null;
 
@@ -208,6 +209,8 @@ export function Dashboard() {
           />
         ))}
       </section>
+
+      <AgentTrace trace={trace} />
 
       <section
         id="coverage"
