@@ -1,22 +1,35 @@
-"""Base agent: scope, specialist prompt, tools, two-phase run, tool-call cap, trace.
+"""Base agent: scope, specialist prompt, tools, prefetch, single report call, trace.
 
-Phase 1 (investigate): Gemini calls tools to gather evidence, calculator outputs and flags.
-Phase 2 (report): a separate structured-output call turns what was gathered into one draft
-finding per requirement. Code, not the model, has already decided applicability and sets status.
+Prefetch mode (``AGENT_MODE=prefetch``, Phase 2): code gathers every piece of evidence the agent
+needs through the toolbox (zero Gemini calls), then the agent makes exactly ONE structured call to
+write its findings. The tool loop survives only as a bounded escalation path for weak findings.
+
+Legacy mode (``AGENT_MODE=legacy``): the original two-phase run, a Gemini tool loop followed by a
+report call. Unchanged, and still used by chat (which calls ``investigate`` directly).
+
+In both modes applicability, status, score and scope come from code, never from the model.
 """
 
 from typing import Any, ClassVar
 
 from google.genai import types
 
+from app.agents.models import EvidencePack, RequirementEvidence
+from app.agents.retrieval_adapter import CHUNKS_PER_REQUIREMENT, Chunk, default_queries, fact_keys, to_chunk
 from app.agents.schemas import AgentName, AgentReport, AgentRunOutput
-from app.agents.tools import AgentToolbox
+from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
 from app.contracts.assessment import ApplicabilityResult
 from app.contracts.facts import BusinessProfile
 from app.core.llm import DEFAULT_TEMPERATURE, ContentGenerator, StructuredGenerator, describe_error
 from app.core.services import Services
+from app.core.settings import get_settings
 
 TOOL_LIMIT_MESSAGE = "Tool call limit reached. Stop calling tools."
+PREFETCH = "prefetch"
+ESCALATION = "escalation"
+ESCALATION_CONFIDENCE = 0.6
+ESCALATION_TOOL_CALLS = 3
+UNKNOWN_FACT = "unknown (we don't know this yet; never treat it as false)"
 
 REPORT_RULES = """\
 Write one finding per requirement listed, using exactly its requirement_id.
@@ -32,6 +45,20 @@ Write one finding per requirement listed, using exactly its requirement_id.
 - flags: gray areas that need a human to check (e.g. ones you flagged during investigation).
 - confidence: 0.0-1.0, how well the evidence supports your explanation.
 - This is general information, not legal advice. Do not give advice beyond the evidence.
+"""
+
+PACK_RULES = """\
+All the evidence code could gather is inside the <evidence> block below. You have no tools on this
+turn: work only from what is shown.
+- Write exactly one finding per requirement that appears in the block, and nothing else. Never add
+  a requirement that is not shown.
+- Never output a status, a score or a priority. Our rules already decided those.
+- Cite only the chunk ids shown under the requirement you are writing about. Never invent an id,
+  and never borrow an id from another requirement.
+- A fact marked unknown means we do not know it. Never treat it as false, and never assume a value.
+- If the chunks shown do not support something you want to say, say instead that we could not find
+  an official source for it.
+- Flag every gray area listed for a requirement that could apply to this owner. Never resolve one.
 """
 
 
@@ -75,7 +102,36 @@ class BaseAgent:
         scope: list[ApplicabilityResult],
         mode: str | None = None,
     ) -> AgentRunOutput:
-        """Investigate then report. Errors are captured on the output, never raised."""
+        """Prefetch then report in one call. Errors are captured on the output, never raised."""
+        if get_settings().agent_mode == "legacy":
+            return await self._run_legacy(assessment_id, profile, scope, mode)
+
+        output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
+        toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
+        try:
+            pack = await self.prefetch(toolbox, profile, scope, mode)
+            report = await self.generate_structured(
+                prompt=self._report_prompt_from_pack(pack),
+                system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
+                schema=AgentReport,
+            )
+            output.drafts = report.findings
+            toolbox.log("report", {}, f"{len(report.findings)} draft finding(s)")
+            if get_settings().escalation_enabled:
+                await self._escalate_weak_findings(toolbox, pack, output, mode)
+        except Exception as exc:  # noqa: BLE001  (any failure becomes a visible, non-fatal error)
+            output.error = describe_error(exc)
+            toolbox.log("error", {}, output.error)
+        return output
+
+    async def _run_legacy(
+        self,
+        assessment_id: str,
+        profile: BusinessProfile,
+        scope: list[ApplicabilityResult],
+        mode: str | None,
+    ) -> AgentRunOutput:
+        """Pre-Phase-2 behaviour: a Gemini tool loop, then a report call."""
         output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
         toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
         try:
@@ -92,8 +148,130 @@ class BaseAgent:
             toolbox.log("error", {}, output.error)
         return output
 
-    async def investigate(self, toolbox: AgentToolbox, prompt: str, mode: str | None) -> None:
-        """Tool-calling loop (shared by assessment and chat), capped at ``max_tool_calls``."""
+    # --- prefetch -----------------------------------------------------------------------------
+
+    async def prefetch(
+        self,
+        toolbox: AgentToolbox,
+        profile: BusinessProfile,
+        scope: list[ApplicabilityResult],
+        mode: str | None,
+    ) -> EvidencePack:
+        """Gather all evidence for the agent's scope through the toolbox. Zero Gemini calls.
+
+        Every lookup goes through ``AgentToolbox.call`` so retrieved chunks stay registered for
+        the strict citation filter and every step lands in the trace with ``source="prefetch"``.
+        Lookups run sequentially: the toolbox mutates shared per-run state and the retrieval
+        service is synchronous, so there is nothing safe to overlap here.
+        """
+        pack = EvidencePack(agent=self.name, mode=mode, profile_summary=profile_summary(profile))
+        toolbox.log(
+            "prefetch",
+            {"requirement_ids": [a.requirement_id for a in scope]},
+            f"gathering evidence for {len(scope)} requirement(s)",
+            source=PREFETCH,
+        )
+
+        facts_read: dict[str, dict[str, Any]] = {}  # one lookup (and one trace entry) per fact key
+        for applicability in scope:
+            req = self.services.registry.get(applicability.requirement_id)
+            if req is None:
+                continue
+            details = toolbox.call("get_requirement", {"requirement_id": req.id}, source=PREFETCH)
+            for query in default_queries(req):
+                toolbox.call(
+                    "retrieve_evidence", {"requirement_id": req.id, "query": query}, source=PREFETCH
+                )
+                if len(toolbox.output.evidence_by_requirement.get(req.id, [])) >= CHUNKS_PER_REQUIREMENT:
+                    break
+            keys = fact_keys(req) or list(profile.facts)
+            for key in keys:
+                if key not in facts_read:
+                    facts_read[key] = toolbox.call("get_profile_fact", {"key": key}, source=PREFETCH)
+            pack.requirements.append(
+                RequirementEvidence(
+                    requirement_id=req.id,
+                    applicability=applicability.status.value,
+                    details={k: v for k, v in details.items() if k != "error"},
+                    gray_areas=list(req.review_flags),
+                    chunks=chunks_for(toolbox.output, req.id),
+                    relevant_facts={key: facts_read[key] for key in keys},
+                )
+            )
+
+        if "get_calculator_result" in self.tool_names:
+            for name in CALCULATOR_NAMES:
+                result = toolbox.call("get_calculator_result", {"name": name}, source=PREFETCH)
+                if "error" not in result:
+                    pack.calculators[name] = result
+        return pack
+
+    # --- escalation ---------------------------------------------------------------------------
+
+    async def _escalate_weak_findings(
+        self, toolbox: AgentToolbox, pack: EvidencePack, output: AgentRunOutput, mode: str | None
+    ) -> None:
+        """One bounded investigate + re-report round for weak findings. Never raises.
+
+        Called exactly once per agent run, so an assessment can never pay for two rounds. A
+        failure here leaves the original drafts in place.
+        """
+        in_pack = {r.requirement_id for r in pack.requirements}
+        targets = {d.requirement_id for d in output.drafts if d.confidence < ESCALATION_CONFIDENCE}
+        targets = (targets | set(pack.without_chunks())) & in_pack
+        if not targets:
+            return
+
+        trace_input = {"requirement_ids": sorted(targets), "escalated": True}
+        try:
+            await self.investigate(
+                toolbox,
+                self._escalation_prompt(pack, targets),
+                mode,
+                max_tool_calls=ESCALATION_TOOL_CALLS,
+            )
+            subset = self._refreshed(pack.subset(targets), output)
+            report = await self.generate_structured(
+                prompt=self._report_prompt_from_pack(subset),
+                system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
+                schema=AgentReport,
+            )
+            merged = {d.requirement_id: d for d in output.drafts}
+            replaced = [d.requirement_id for d in report.findings if d.requirement_id in targets]
+            for draft in report.findings:
+                if draft.requirement_id in targets:
+                    merged[draft.requirement_id] = draft
+            output.drafts = list(merged.values())
+            toolbox.log(
+                "escalate", trace_input, f"re-reported {len(replaced)} finding(s)", source=ESCALATION
+            )
+        except Exception as exc:  # noqa: BLE001  (escalation is best-effort; keep the first drafts)
+            toolbox.log("escalate", trace_input, f"escalation failed: {describe_error(exc)}", source=ESCALATION)
+
+    def _refreshed(self, pack: EvidencePack, output: AgentRunOutput) -> EvidencePack:
+        """Re-read chunks and investigation flags off the run output after escalation."""
+        requirements = [
+            r.model_copy(
+                update={
+                    "chunks": chunks_for(output, r.requirement_id),
+                    "gray_areas": list(dict.fromkeys([*r.gray_areas, *output.flags.get(r.requirement_id, [])])),
+                }
+            )
+            for r in pack.requirements
+        ]
+        return pack.model_copy(update={"requirements": requirements})
+
+    # --- tool loop ----------------------------------------------------------------------------
+
+    async def investigate(
+        self,
+        toolbox: AgentToolbox,
+        prompt: str,
+        mode: str | None,
+        max_tool_calls: int | None = None,
+    ) -> None:
+        """Tool-calling loop (shared by assessment, chat and escalation), capped at ``max_tool_calls``."""
+        limit = self.max_tool_calls if max_tool_calls is None else max_tool_calls
         config = types.GenerateContentConfig(
             system_instruction=self.system_prompt(mode),
             temperature=DEFAULT_TEMPERATURE,
@@ -102,7 +280,7 @@ class BaseAgent:
         )
         contents: list[types.Content] = [types.Content(role="user", parts=[types.Part(text=prompt)])]
         calls = 0
-        for _ in range(self.max_tool_calls + 1):
+        for _ in range(limit + 1):
             response = await self.generate(contents, config)
             function_calls = response.function_calls or []
             if not function_calls or not response.candidates or response.candidates[0].content is None:
@@ -111,16 +289,16 @@ class BaseAgent:
             parts: list[types.Part] = []
             for fc in function_calls:
                 name, args = fc.name or "", dict(fc.args or {})
-                if calls >= self.max_tool_calls:
+                if calls >= limit:
                     result: dict[str, Any] = {"error": TOOL_LIMIT_MESSAGE}
                     toolbox.log(name, args, f"skipped: {TOOL_LIMIT_MESSAGE}")
                 else:
                     calls += 1
-                    toolbox.output.tool_calls = calls
+                    toolbox.output.tool_calls += 1
                     result = toolbox.call(name, args)
                 parts.append(types.Part(function_response=types.FunctionResponse(id=fc.id, name=name, response=result)))
             contents.append(types.Content(role="user", parts=parts))
-            if calls >= self.max_tool_calls:
+            if calls >= limit:
                 break
 
     # --- prompts ------------------------------------------------------------------------------
@@ -136,6 +314,80 @@ class BaseAgent:
             self.mode_instructions(mode),
         ]
         return "\n\n".join(p for p in parts if p)
+
+    def _report_prompt_from_pack(self, pack: EvidencePack) -> str:
+        """The single report call's prompt: everything code knows, in one delimited block."""
+        lines = [f"Owner facts:\n{facts_summary_from_pack(pack)}", ""]
+        if pack.mode:
+            lines += [f"Mode: {pack.mode}", self.mode_instructions(pack.mode), ""]
+        for name, calc in pack.calculators.items():
+            lines.append(
+                f"Calculator {name}: {calc.get('outcome')}; numbers: {calc.get('numbers_used')}; "
+                f"estimated crossing (estimate only): {calc.get('estimated_crossing')}"
+            )
+        if pack.calculators:
+            lines.append("")
+        lines += [
+            PACK_RULES,
+            f"Requirements to report on ({len(pack.requirements)}): "
+            + ", ".join(r.requirement_id for r in pack.requirements),
+            "",
+            "<evidence>",
+        ]
+        for req in pack.requirements:
+            lines += self._requirement_block(req)
+        lines.append("</evidence>")
+        return "\n".join(lines)
+
+    def _requirement_block(self, req: RequirementEvidence) -> list[str]:
+        details = req.details
+        title = details.get("title", req.requirement_id)
+        lines = [
+            f"## {req.requirement_id}: {title}",
+            f"Type: {details.get('requirement_type', 'unknown')}. Timing: {details.get('timing', 'unknown')}. "
+            f"Applicability (decided by code, read-only): {req.applicability}.",
+        ]
+        if req.missing_facts:
+            lines.append(f"Facts we are missing: {', '.join(req.missing_facts)}")
+        if req.relevant_facts:
+            lines.append("Facts this requirement depends on:")
+            lines += [f"- {key}: {render_fact(fact)}" for key, fact in req.relevant_facts.items()]
+        if details.get("preparation_items"):
+            lines.append(f"Preparation items: {'; '.join(details['preparation_items'])}")
+        if req.gray_areas:
+            lines.append(f"Gray areas to flag (never resolve): {'; '.join(req.gray_areas)}")
+        if not req.chunks:
+            lines.append("Evidence: NONE FOUND.")
+        for chunk in req.chunks:
+            lines.append(
+                f"Evidence [{chunk.id}] {chunk.source_title} / {chunk.section_ref or ''}: {chunk.text}"
+            )
+        lines.append("")
+        return lines
+
+    def _escalation_prompt(self, pack: EvidencePack, targets: set[str]) -> str:
+        by_id = {r.requirement_id: r for r in pack.requirements}
+        lines = [
+            "Our first pass could not explain these requirements well enough, either because no "
+            "official source was found or because the evidence was weak. Dig for better evidence "
+            "for these requirement IDs only:",
+        ]
+        for req_id in sorted(targets):
+            req = by_id[req_id]
+            title = req.details.get("title", req_id)
+            found = f"{len(req.chunks)} chunk(s) already found" if req.chunks else "no evidence found yet"
+            lines.append(f"- {req_id} {title} (applicability: {req.applicability}; {found})")
+        lines += [
+            "",
+            "Owner facts:",
+            facts_summary_from_pack(pack),
+            "",
+            "Call retrieve_evidence with different, more specific wording than a plain restatement "
+            "of the title, and flag_for_review for any gray area that applies to this owner. You "
+            f"have at most {ESCALATION_TOOL_CALLS} tool calls in total, so call several at once. "
+            "When finished, reply with the single word DONE.",
+        ]
+        return "\n".join(lines)
 
     def _investigate_prompt(self, output: AgentRunOutput, profile: BusinessProfile) -> str:
         lines = ["Requirements in your scope (applicability decided by code):"]
@@ -184,6 +436,53 @@ class BaseAgent:
                 lines.append(f"Evidence [{cid}] {chunk.title} / {chunk.section_path or ''}: {chunk.text}")
             lines.append("")
         return "\n".join(lines)
+
+
+def chunks_for(output: AgentRunOutput, requirement_id: str) -> list[Chunk]:
+    """Contract-shaped chunks retrieved for one requirement in this run, capped and deduped."""
+    chunk_ids = dict.fromkeys(output.evidence_by_requirement.get(requirement_id, []))
+    return [
+        to_chunk(output.retrieved[cid], requirement_id)
+        for cid in list(chunk_ids)[:CHUNKS_PER_REQUIREMENT]
+        if cid in output.retrieved
+    ]
+
+
+def render_fact(fact: dict[str, Any]) -> str:
+    """Render one ``get_profile_fact`` result. Unknown is never rendered as false."""
+    if not fact.get("known"):
+        return UNKNOWN_FACT
+    if "entries" in fact:
+        return f"{len(fact['entries'])} month(s) of revenue entered"
+    return f"{fact.get('value')}"
+
+
+def profile_summary(profile: BusinessProfile) -> dict[str, Any]:
+    """The profile as structured data for the evidence pack, preserving unknown facts."""
+    return {
+        "legal_name": profile.legal_name,
+        "trading_name": profile.trading_name,
+        "jurisdiction_ids": list(profile.jurisdiction_ids),
+        "segment_id": profile.segment_id,
+        "facts": {
+            key: {"known": fact.is_known, "value": fact.value if fact.is_known else None}
+            for key, fact in profile.facts.items()
+        },
+        "revenue_months": len(profile.monthly_revenue),
+    }
+
+
+def facts_summary_from_pack(pack: EvidencePack) -> str:
+    """``facts_summary`` for a pack, so the single call sees the same wording as the legacy path."""
+    summary = pack.profile_summary
+    facts: dict[str, dict[str, Any]] = summary.get("facts", {})
+    lines = [
+        f"- legal_name: {summary.get('legal_name') or 'unknown'}",
+        f"- trading_name: {summary.get('trading_name') or 'unknown'}",
+    ]
+    lines += [f"- {key}: {fact['value'] if fact.get('known') else 'unknown'}" for key, fact in facts.items()]
+    lines.append(f"- monthly_revenue: {summary.get('revenue_months', 0)} month(s) entered")
+    return "\n".join(lines)
 
 
 def facts_summary(profile: BusinessProfile) -> str:

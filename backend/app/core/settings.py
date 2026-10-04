@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,6 +24,8 @@ class Settings(BaseSettings):
     gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables
     gemini_embedding_model: str = "gemini-embedding-001"
     use_stubs: bool = True
+    agent_mode: Literal["prefetch", "legacy"] = "legacy"  # prefetch: one Gemini call per agent
+    escalation_enabled: bool = True  # one extra investigate+report round for weak findings
 
 
 @lru_cache
