@@ -50,7 +50,7 @@ def validate_citations(
             continue
         if draft.requirement_id in report.drafts:
             continue
-        valid = [c for c in draft.claims if _is_supported(c, retrieved_ids)]
+        valid = supported_claims(draft.claims, retrieved_ids)
         report.dropped_claims += len(draft.claims) - len(valid)
         if valid:
             report.drafts[draft.requirement_id] = draft.model_copy(update={"claims": valid})
@@ -64,8 +64,9 @@ def validate_citations(
     return report
 
 
-def _is_supported(claim: ClaimDraft, retrieved_ids: set[str]) -> bool:
-    return bool(claim.chunk_ids) and all(cid in retrieved_ids for cid in claim.chunk_ids)
+def supported_claims(claims: list[ClaimDraft], retrieved_ids: set[str]) -> list[ClaimDraft]:
+    """Keep only claims whose every cited chunk was retrieved in this run."""
+    return [c for c in claims if c.chunk_ids and all(cid in retrieved_ids for cid in c.chunk_ids)]
 
 
 def _no_source(requirement_id: str, flags: list[str]) -> FindingDraft:
