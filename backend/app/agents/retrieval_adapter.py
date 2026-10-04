@@ -1,14 +1,11 @@
 """Adapter between Developer 1's retrieval contract and the Phase 2 evidence pack.
 
 Phase 2 code is written against the frozen contract (``Chunk`` with ``id``/``source_title``/
-``section_ref``, plus ``KB_VERSION``). The retrieval service in this repo returns
+``section_ref``, plus a knowledge-base version). The retrieval service in this repo returns
 ``RetrievedChunk`` (``chunk_id``/``title``/``section_path``). Rather than edit Developer 1's
-module, prefetch keeps calling ``AgentToolbox.retrieve_evidence`` (so retrieved-chunk tracking
-and the strict citation filter stay untouched) and converts what lands in
-``AgentRunOutput.retrieved`` here.
+module, prefetch keeps calling the toolbox (so retrieved-chunk tracking and the strict citation
+filter stay untouched) and converts what lands in ``AgentRunOutput.retrieved`` here.
 """
-
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -16,16 +13,19 @@ from app.contracts.registry import Requirement
 from app.contracts.retrieval import RetrievedChunk
 
 CHUNKS_PER_REQUIREMENT = 6
+STUB_KB_VERSION = "stub"
 
 
-def _kb_version() -> str:
-    """``KB_VERSION`` from the retrieval module once Phase 1 defines it, else ``"stub"``."""
-    from app.knowledge import stubs
+def kb_version(retrieval: object) -> str:
+    """The retrieval service's knowledge-base version, or ``"stub"`` until Phase 1 exposes it.
 
-    return str(getattr(stubs, "KB_VERSION", "stub"))
-
-
-KB_VERSION = _kb_version()
+    Developer 1 is adding ``RetrievalService.knowledge_base_version() -> str`` (a digest of the
+    current corpus identity) before Phase 3; it must not be a module constant or a settings value
+    because it has to change whenever the live corpus changes. Nothing in Phase 2 depends on it
+    yet: the finding cache that needs it arrives in Phase 3.
+    """
+    get_version = getattr(retrieval, "knowledge_base_version", None)
+    return str(get_version()) if callable(get_version) else STUB_KB_VERSION
 
 
 class Chunk(BaseModel):
@@ -56,21 +56,20 @@ def to_chunk(retrieved: RetrievedChunk, requirement_id: str) -> Chunk:
 def default_queries(req: Requirement) -> list[str]:
     """Retrieval queries for one requirement, without asking Gemini what to search.
 
-    Uses the registry's ``default_queries`` (Phase 1.6) once it exists. Until then: the official
-    title, plus a plain-language phrasing of it. Never adds fields to the registry.
+    The official title plus a plain-language phrasing of it. Reviewed queries are deliberately
+    *not* in the registry: Developer 1 decided that if they ever land the field will be named
+    ``Requirement.default_queries: list[str]`` and will need research-owner review first, so it
+    must not be treated as available. TiDB's semantic ranking makes the title-based queries good
+    enough for the current corpus. Never adds fields to the registry.
     """
-    registered = getattr(req, "default_queries", None)
-    if registered:
-        return [q for q in registered if q]
     return [req.title, f"do I need to {req.title[0].lower()}{req.title[1:]} as a sole proprietor"]
 
 
 def fact_keys(req: Requirement) -> list[str]:
     """Profile fact keys this requirement's applicability and explanation depend on.
 
-    ``Requirement.depends_on`` holds prerequisite *requirement* IDs in this registry, not fact
-    keys, so the fact keys come from ``required_fact_keys``. ``depends_on_facts`` is read first in
-    case Phase 3.1 adds it. An empty result means "read every profile fact" (safe default).
+    ``Requirement.required_fact_keys`` is the canonical field (confirmed by Developer 1).
+    ``Requirement.depends_on`` stays what it is in this registry: ordered prerequisite
+    *requirement* IDs, never fact keys. An empty result means "read every profile fact".
     """
-    declared: Any = getattr(req, "depends_on_facts", None) or req.required_fact_keys
-    return [key for key in declared if key]
+    return [key for key in req.required_fact_keys if key]
