@@ -105,8 +105,11 @@ class AgentToolbox:
         """Function declarations for the tools this agent may use."""
         return [DECLARATIONS[name] for name in self.tool_names]
 
-    def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
-        """Run one tool call and log it. Bad calls return an error dict instead of raising."""
+    def call(self, name: str, args: dict[str, Any], source: str | None = None) -> dict[str, Any]:
+        """Run one tool call and log it. Bad calls return an error dict instead of raising.
+
+        ``source`` marks who made the call (e.g. ``"prefetch"``) in the trace entry.
+        """
         if name not in self.tool_names:
             result: dict[str, Any] = {"error": f"Tool {name} is not available to you."}
         else:
@@ -114,18 +117,24 @@ class AgentToolbox:
                 result = self._handlers[name](**args)
             except TypeError as exc:
                 result = {"error": f"Bad arguments for {name}: {exc}"}
-        self.log(name, args, _summarize(name, result))
+        self.log(name, args, _summarize(name, result), source)
         return result
 
-    def log(self, tool_name: str, tool_input: dict[str, Any], summary: str) -> None:
-        """Append a trace entry for this agent."""
+    def log(
+        self, tool_name: str, tool_input: dict[str, Any], summary: str, source: str | None = None
+    ) -> None:
+        """Append a trace entry for this agent.
+
+        ``source`` is stored inside ``tool_input`` because that is the dict the trace endpoint
+        persists and returns; no trace schema change is needed.
+        """
         self.output.trace.append(
             AgentTraceEntry(
                 assessment_id=self.assessment_id,
                 agent=self.agent,
                 step=len(self.output.trace),
                 tool_name=tool_name,
-                tool_input=tool_input,
+                tool_input={**tool_input, "source": source} if source else tool_input,
                 tool_output_summary=summary,
             )
         )
