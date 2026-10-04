@@ -5,7 +5,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import routes_assess, routes_chat, routes_dev, routes_health, routes_intake, routes_profile
+from app.api import (
+    routes_actions,
+    routes_assess,
+    routes_chat,
+    routes_dev,
+    routes_health,
+    routes_intake,
+    routes_profile,
+)
 from app.core.db import init_db
 
 
@@ -21,4 +29,5 @@ app.include_router(routes_profile.router)
 app.include_router(routes_intake.router)
 app.include_router(routes_assess.router)
 app.include_router(routes_chat.router)
+app.include_router(routes_actions.router)
 app.include_router(routes_dev.router)

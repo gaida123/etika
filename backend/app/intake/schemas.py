@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.contracts.facts import BusinessProfile
+from app.contracts.facts import BusinessProfile, RevenueEntry
 from app.intake.fact_dictionary import FactKey
 
 
@@ -68,3 +68,21 @@ class ConfirmUpdateResponse(BaseModel):
     proposal_id: str
     applied_keys: list[str]
     profile: BusinessProfile
+
+
+class DirectProfileUpdateRequest(BaseModel):
+    """Owner-confirmed answers entered directly in the dashboard.
+
+    Unlike ``ConfirmUpdateRequest``, this route is for a fact the owner selected in
+    the UI rather than a fact proposed by Gemini.  Values are deliberately raw at
+    the API boundary so the browser can send a simple ``{fact_key: value}`` map;
+    the route validates them with the shared fact dictionary before marking them
+    confirmed and creating a new profile version.
+    """
+
+    facts: dict[FactKey, Any] = Field(default_factory=dict)
+    monthly_revenue: list[RevenueEntry] | None = Field(default=None, min_length=1)
+
+    def has_changes(self) -> bool:
+        """Avoid creating an identical version for an accidental empty PATCH."""
+        return bool(self.facts) or self.monthly_revenue is not None

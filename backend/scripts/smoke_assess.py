@@ -1,9 +1,13 @@
-"""Live assessment of the Maya persona with REAL Gemini agents and stub knowledge services.
+"""Live assessment of the Maya persona through the production-shaped API flow.
 
 Run from backend/:  python scripts/smoke_assess.py [--hire]
-Roughly 6-12 Gemini calls. --hire first confirms has_employees=true (the demo climax).
+Roughly 3 report calls plus batched retrieval embeddings. ``--hire`` first saves
+``has_employees=true`` as a new profile version (the demo climax). The script
+creates a new Maya profile and assessment in the configured database; unlike the
+old development helper, it works when ``USE_STUBS=false``.
 """
 
+import json
 import logging
 import sys
 import time
@@ -14,22 +18,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.api.main import app  # noqa: E402
-from app.contracts.facts import FactValue  # noqa: E402
-from app.core.db import get_sessionmaker  # noqa: E402
-from app.intake import profile_service  # noqa: E402
-from app.intake.profile_service import ProfileUpdate  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING, format="  [log] %(message)s")
+MAYA_PROFILE_PATH = Path(__file__).resolve().parents[2] / "contracts" / "examples" / "maya_profile.json"
+
+
+def _require_success(response: object) -> dict[str, object]:
+    """Return an API body or stop without printing potentially sensitive settings."""
+    status_code = getattr(response, "status_code", 500)
+    if status_code < 400:
+        return getattr(response, "json")()
+    print(f"FAILED: API returned {status_code}.")
+    sys.exit(1)
 
 
 def main() -> None:
     with TestClient(app) as client:
-        business_id = client.post("/dev/load-demo").json()["business_id"]
+        maya = json.loads(MAYA_PROFILE_PATH.read_text(encoding="utf-8"))
+        created = _require_success(client.post("/profile", json=maya))
+        business_id = str(created["business_id"])
         if "--hire" in sys.argv:
-            with get_sessionmaker()() as session:
-                profile_service.update_facts(
-                    session, business_id, ProfileUpdate(facts={"has_employees": FactValue(value=True, confirmed=True)})
-                )
+            updated = _require_success(
+                client.patch(f"/profile/{business_id}", json={"facts": {"has_employees": True}})
+            )
+            print(f"Maya profile updated to version {updated['profile_version']} with a confirmed first hire.")
 
         start = time.monotonic()
         resp = client.post(f"/assess/{business_id}")
