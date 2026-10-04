@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # research review and requirement mappings are complete.
     allow_unreviewed_knowledge: bool = False
     allow_candidate_requirement_mappings: bool = False
+    # Demo-only override for the current registry draft. Production must expose
+    # only rows that the research owner has marked approved.
+    allow_draft_registry: bool = False
 
 
 @lru_cache
