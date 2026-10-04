@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables
     gemini_embedding_model: str = "gemini-embedding-001"
     use_stubs: bool = True
-    agent_mode: Literal["prefetch", "legacy"] = "legacy"  # prefetch: one Gemini call per agent
+    agent_mode: Literal["prefetch", "legacy"] = "prefetch"  # prefetch: one Gemini call per agent
     escalation_enabled: bool = True  # one extra investigate+report round for weak findings
 
 
