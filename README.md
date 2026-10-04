@@ -3,8 +3,6 @@
 > **Code decides. Gemini explains.**
 > A compliance navigator for new Vancouver, BC sole proprietors: three specialist AI agents check your situation against official government sources and tell you what applies to *you*, why, and what to do next.
 
-📄 [Devpost writeup](docs/DEVPOST.md) · 🧭 [Agent upgrade plan](docs/Etika%20Agent%20Upgrade%20Plan%20-%20Gemini%20Call%20+%20Itdb.md) · ⚠️ Etika shows requirements that *may* apply. It is general information, **not legal advice**.
-
 ---
 
 ## Inspiration
