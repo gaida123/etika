@@ -1,6 +1,10 @@
-"""Agents, orchestrator, citation validation and assessment routes (Gemini faked)."""
+"""Agents, orchestrator, citation validation and assessment routes (Gemini faked).
 
-from collections.abc import Iterator
+These cover the legacy investigate+report path, so every test here pins AGENT_MODE="legacy".
+The Phase 2 prefetch path is covered in test_prefetch.py.
+"""
+
+from collections.abc import Callable, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +25,11 @@ from tests.fake_gemini import INVENTED_CHUNK, FakeGemini
 def use_fake(fake: FakeGemini) -> None:
     app.dependency_overrides[get_content_generator] = lambda: fake.generate
     app.dependency_overrides[get_llm] = lambda: fake.structured
+
+
+@pytest.fixture(autouse=True)
+def legacy_mode(agent_mode: Callable[..., None]) -> None:
+    agent_mode("legacy")
 
 
 @pytest.fixture

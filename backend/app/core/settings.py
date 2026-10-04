@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,6 +27,8 @@ class Settings(BaseSettings):
     # TiDB's VECTOR(D) column and every document/query embedding.
     gemini_embedding_dimensions: int = 3072
     use_stubs: bool = True
+    agent_mode: Literal["prefetch", "legacy"] = "prefetch"  # prefetch: one Gemini call per agent
+    escalation_enabled: bool = True  # one extra investigate+report round for weak findings
     # Lets us exercise the real TiDB corpus while the rest of Developer 1's services
     # are still stubs. This is a staging switch, not the production cutover switch.
     use_tidb_retrieval: bool = False
