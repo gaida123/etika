@@ -13,7 +13,7 @@ import { type ChatTurn, useBusiness } from "./BusinessProvider";
 import { FactQuestion } from "./FactQuestion";
 
 export const SUGGESTIONS_GENERAL = [
-  "Do I need a business licence?",
+  "Do I need to register my business name?",
   "When do I have to register for PST?",
   "What changes when I hire someone?",
 ];
