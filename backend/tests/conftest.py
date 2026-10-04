@@ -4,6 +4,9 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["USE_STUBS"] = "true"
+os.environ["USE_TIDB_RETRIEVAL"] = "false"
+os.environ["ALLOW_UNREVIEWED_KNOWLEDGE"] = "false"
+os.environ["ALLOW_CANDIDATE_REQUIREMENT_MAPPINGS"] = "false"
 
 from collections.abc import Callable, Iterator  # noqa: E402
 

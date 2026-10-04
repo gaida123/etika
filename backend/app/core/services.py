@@ -1,6 +1,6 @@
 """Service factory: returns Developer 1's stubs or real implementations based on USE_STUBS."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from app.contracts.services import (
@@ -53,5 +53,20 @@ def build_real_services() -> Services:
 
 @lru_cache
 def get_services() -> Services:
-    """Return stubs when USE_STUBS=true, otherwise the real implementations."""
-    return build_stub_services() if get_settings().use_stubs else build_real_services()
+    """Build the configured service bundle.
+
+    ``USE_TIDB_RETRIEVAL`` is a narrow staging switch: it exercises the real corpus while
+    the reviewed registry and deterministic assessment services remain on their existing
+    stub implementations. It is deliberately separate from the full ``USE_STUBS=false``
+    production cutover.
+    """
+    settings = get_settings()
+    if not settings.use_stubs:
+        return build_real_services()
+
+    services = build_stub_services()
+    if settings.use_tidb_retrieval:
+        from app.knowledge.tidb_retrieval import TiDBRetrievalService
+
+        return replace(services, retrieval=TiDBRetrievalService())
+    return services
