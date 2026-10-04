@@ -228,7 +228,23 @@ class TiDBRetrievalService:
             if semantic_enabled:
                 filters["ranking"] = "semantic_vector"
                 limitations[0] = "TiDB cosine-distance semantic ranking is in use."
-            results.append(self._rank_candidates(request, candidates, filters, limitations, semantic_enabled))
+            source_chunk_ids = self._registry_source_chunk_ids(request.requirement_ids)
+            if source_chunk_ids is not None and request.requirement_ids:
+                filters["requirement_source_tags_used"] = True
+            elif request.requirement_ids:
+                limitations.append(
+                    "Requirement source-tag mappings were unavailable; legacy corpus mappings were used."
+                )
+            results.append(
+                self._rank_candidates(
+                    request,
+                    candidates,
+                    filters,
+                    limitations,
+                    semantic_enabled,
+                    source_chunk_ids,
+                )
+            )
         return results
 
     def knowledge_base_version(self) -> str:
@@ -265,6 +281,7 @@ class TiDBRetrievalService:
         filters: dict[str, Any],
         limitations: list[str],
         semantic_enabled: bool,
+        registry_source_chunk_ids: dict[str, set[str]] | None = None,
     ) -> RetrievalResult:
         """Return filtered evidence, or an explicit insufficient-evidence result.
 
@@ -294,7 +311,9 @@ class TiDBRetrievalService:
                 continue
             mapping_kind = "unscoped"
             if requested_requirements:
-                mapping_kind = self._requirement_match_kind(row, requested_requirements)
+                mapping_kind = self._requirement_match_kind(
+                    row, requested_requirements, registry_source_chunk_ids
+                )
                 if mapping_kind is None:
                     continue
 
@@ -422,6 +441,7 @@ class TiDBRetrievalService:
                 mapped_requirement_ids,
                 review_status,
                 source_version,
+                retrieved_at,
                 effective_from,
                 effective_to,
                 is_current,
@@ -457,9 +477,20 @@ class TiDBRetrievalService:
         return isinstance(review_status, str) and review_status.strip().casefold() in self._approved_review_statuses
 
     def _requirement_match_kind(
-        self, row: Mapping[str, Any], requested_requirement_ids: set[str]
+        self,
+        row: Mapping[str, Any],
+        requested_requirement_ids: set[str],
+        registry_source_chunk_ids: Mapping[str, set[str]] | None,
     ) -> str | None:
-        """Classify a mapping, preferring finalized IDs over candidate research leads."""
+        """Use registry-owned source tags when available; legacy fields are staging-only."""
+        if registry_source_chunk_ids is not None:
+            chunk_id = _as_nonempty_string(row.get("chunk_id"))
+            if chunk_id and any(
+                chunk_id in registry_source_chunk_ids.get(requirement_id, set())
+                for requirement_id in requested_requirement_ids
+            ):
+                return "mapped"
+            return None
         mapped = set(_json_string_list(row.get("mapped_requirement_ids")))
         if mapped.intersection(requested_requirement_ids):
             return "mapped"
@@ -467,6 +498,34 @@ class TiDBRetrievalService:
             return None
         candidates = set(_json_string_list(row.get("candidate_requirement_ids")))
         return "candidate" if candidates.intersection(requested_requirement_ids) else None
+
+    def _registry_source_chunk_ids(
+        self, requirement_ids: Sequence[str]
+    ) -> dict[str, set[str]] | None:
+        """Read reviewed source tags from the requirements registry without trusting chunk metadata.
+
+        An empty list is meaningful (notably REG-02): it deliberately produces no citation.
+        The legacy chunk mapping fields remain only as a migration fallback when the registry
+        table itself is unavailable to an older staging corpus.
+        """
+        requested = [requirement_id for requirement_id in dict.fromkeys(requirement_ids) if requirement_id]
+        if not requested:
+            return {}
+        placeholders = ", ".join(f":requirement_{index}" for index in range(len(requested)))
+        statement = text(
+            f"SELECT id, source_chunk_ids FROM requirements WHERE id IN ({placeholders})"
+        )
+        params = {f"requirement_{index}": requirement_id for index, requirement_id in enumerate(requested)}
+        try:
+            rows = self._execute_mappings(statement, params)
+        except (SQLAlchemyError, TypeError):
+            return None
+        result = {requirement_id: set() for requirement_id in requested}
+        for row in rows:
+            requirement_id = _as_nonempty_string(row.get("id"))
+            if requirement_id in result:
+                result[requirement_id] = set(_json_string_list(row.get("source_chunk_ids")))
+        return result
 
     def _filters(self, request: RetrievalRequest) -> dict[str, Any]:
         """Make all applied and unavailable filters auditable in the response."""
@@ -533,6 +592,7 @@ def _row_to_chunk(row: Mapping[str, Any]) -> RetrievedChunk:
         source_version=_as_nonempty_string(row.get("source_version")) or "unknown",
         effective_from=_parse_effective_datetime(row.get("effective_from"), end_of_day=False)[0],
         effective_to=_parse_effective_datetime(row.get("effective_to"), end_of_day=True)[0],
+        retrieved_at=_as_nonempty_string(row.get("retrieved_at")),
         score=None,
     )
 

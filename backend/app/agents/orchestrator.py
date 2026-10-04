@@ -239,7 +239,14 @@ class Orchestrator:
         if finding:
             cited = dict.fromkeys(cid for c in finding.claims for cid in c.chunk_ids)
             update["sources"] = [
-                SourceLink(title=chunks[cid].title, url=chunks[cid].url) for cid in cited if cid in chunks
+                SourceLink(
+                    title=chunks[cid].title,
+                    url=chunks[cid].url,
+                    section_path=chunks[cid].section_path,
+                    retrieved_at=chunks[cid].retrieved_at,
+                )
+                for cid in cited
+                if cid in chunks
             ]
         if item.requirement_id in PROGRESS_CALCULATORS:
             name, current_key = PROGRESS_CALCULATORS[item.requirement_id]

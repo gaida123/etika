@@ -19,7 +19,7 @@ export type BusinessProfile = {
   monthly_revenue: { month: string; amount: string | number }[];
 };
 
-export type SourceLink = { title: string; url: string };
+export type SourceLink = { title: string; url: string; section_path?: string | null; retrieved_at?: string | null };
 
 export type AssessmentItem = {
   requirement_id: string;
@@ -103,6 +103,7 @@ export type RetrievedChunk = {
   section_path: string | null;
   url: string;
   source_version: string;
+  retrieved_at?: string | null;
 };
 
 export type RequirementDetail = {

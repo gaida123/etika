@@ -1,7 +1,8 @@
 """Backfill Gemini embeddings into the TiDB ``knowledge_chunks`` vector column.
 
-This is deliberately resumable: rows tagged with the currently configured model are
-skipped. Run a dry plan first, then use --apply in modest batches:
+This is deliberately resumable: only approved, current source content that has no
+vector, used a different model, or changed since its last embedding is selected.
+Run a dry plan first, then use --apply in modest batches:
 
     python scripts/backfill_embeddings.py
     python scripts/backfill_embeddings.py --apply --batch-size 5
@@ -10,12 +11,13 @@ skipped. Run a dry plan first, then use --apply in modest batches:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -23,30 +25,61 @@ from app.core.db import get_engine  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app.knowledge.embeddings import EmbeddingUnavailable, GeminiEmbeddingService  # noqa: E402
 
+APPROVED_REVIEW_STATUSES = (
+    "approved",
+    "approved_by_research_owner",
+    "research_owner_approved",
+)
+
 
 def _pending_rows(limit: int | None) -> list[dict[str, object]]:
-    statement = """
-        SELECT chunk_id, body_text, full_text
+    statement_sql = """
+        SELECT chunk_id, body_text, full_text, text_hash, normalised_content_hash,
+               raw_content_hash, url
         FROM knowledge_chunks
         WHERE is_current = 1
-          AND (embedding IS NULL OR embedding_model IS NULL OR embedding_model <> :model)
+          AND review_status IN :approved_statuses
+          AND (embedding IS NULL OR embedding_model IS NULL OR embedding_model <> :model
+               OR embedded_text_hash IS NULL
+               OR embedded_text_hash <> COALESCE(text_hash, normalised_content_hash, raw_content_hash,
+                                                 SHA2(full_text, 256)))
         ORDER BY chunk_id
     """
     if limit is not None:
-        statement += " LIMIT :limit"
-    params: dict[str, object] = {"model": get_settings().gemini_embedding_model}
+        statement_sql += " LIMIT :limit"
+    statement = text(statement_sql).bindparams(bindparam("approved_statuses", expanding=True))
+    params: dict[str, object] = {
+        "model": get_settings().gemini_embedding_model,
+        "approved_statuses": APPROVED_REVIEW_STATUSES,
+    }
     if limit is not None:
         params["limit"] = limit
     with get_engine().connect() as connection:
-        return [dict(row) for row in connection.execute(text(statement), params).mappings()]
+        return [
+            dict(row)
+            for row in connection.execute(statement, params).mappings()
+            if _approved_http_url(row.get("url"))
+        ]
 
 
 def _chunk_text(row: dict[str, object]) -> str:
-    for field in ("body_text", "full_text"):
+    value = row.get("full_text")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise ValueError("knowledge chunk has no usable full_text")
+
+
+def _content_hash(row: dict[str, object]) -> str:
+    """Use the loader's normalized text hash, with a stable local fallback."""
+    for field in ("text_hash", "normalised_content_hash", "raw_content_hash"):
         value = row.get(field)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    raise ValueError("knowledge chunk has no usable text")
+    return hashlib.sha256(_chunk_text(row).encode("utf-8")).hexdigest()
+
+
+def _approved_http_url(value: object) -> bool:
+    return isinstance(value, str) and value.startswith(("https://", "http://"))
 
 
 def _batches(items: Sequence[dict[str, object]], size: int) -> list[Sequence[dict[str, object]]]:
@@ -58,7 +91,10 @@ def _write_batch(rows: Sequence[dict[str, object]], vectors: Sequence[Sequence[f
     statement = text(
         """
         UPDATE knowledge_chunks
-        SET embedding = :embedding, embedding_model = :embedding_model, embedded_at = UTC_TIMESTAMP()
+        SET embedding = :embedding,
+            embedding_model = :embedding_model,
+            embedded_text_hash = :embedded_text_hash,
+            embedded_at = UTC_TIMESTAMP()
         WHERE chunk_id = :chunk_id
         """
     )
@@ -68,6 +104,7 @@ def _write_batch(rows: Sequence[dict[str, object]], vectors: Sequence[Sequence[f
             # TiDB's VECTOR column accepts this vector literal via the bound string.
             "embedding": json.dumps(list(vector), separators=(",", ":")),
             "embedding_model": model,
+            "embedded_text_hash": _content_hash(row),
         }
         for row, vector in zip(rows, vectors, strict=True)
     ]

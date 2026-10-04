@@ -74,6 +74,8 @@ class SourceLink(BaseModel):
 
     title: str
     url: str
+    section_path: str | None = None
+    retrieved_at: str | None = None
 
 
 class AssessmentItem(BaseModel):

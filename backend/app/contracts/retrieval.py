@@ -33,6 +33,7 @@ class RetrievedChunk(BaseModel):
     source_version: str
     effective_from: datetime | None
     effective_to: datetime | None
+    retrieved_at: str | None = None
     score: float | None
 
 

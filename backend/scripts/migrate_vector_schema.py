@@ -89,6 +89,8 @@ def main() -> None:
         planned.append(f"ALTER TABLE {TABLE} ADD COLUMN embedding_model VARCHAR(128) NULL")
     if "embedded_at" not in columns:
         planned.append(f"ALTER TABLE {TABLE} ADD COLUMN embedded_at DATETIME NULL")
+    if "embedded_text_hash" not in columns:
+        planned.append(f"ALTER TABLE {TABLE} ADD COLUMN embedded_text_hash CHAR(64) NULL")
     if args.enable_tiflash:
         planned.append(f"ALTER TABLE {TABLE} SET TIFLASH REPLICA 1")
     if args.create_index and not _index_exists():
