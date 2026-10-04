@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Etika data and decision flow</title>
+  <desc id="desc">A pitch-ready architecture diagram showing how owner inputs flow through the Next.js app, FastAPI, deterministic rules, specialist Gemini agents and TiDB evidence to produce a cited compliance plan.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#aab8ad" stroke-width="1.2"/></marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#a2bb4e" stroke-width="1.2"/></marker>
+    <style>
+      .bg{fill:#0d2017}.rule{stroke:#436151;stroke-width:1}.line{fill:none;stroke:#aab8ad;stroke-width:1.1;marker-end:url(#arrow)}.data{fill:none;stroke:#a2bb4e;stroke-width:1.2;marker-end:url(#arrowGreen)}.dash{fill:none;stroke:#77907f;stroke-width:1;stroke-dasharray:5 5}.box{fill:#10251a;stroke:#a2bb4e;stroke-width:1.5}.boxAI{fill:#16251a;stroke:#c26ac8;stroke-width:1.5}.boxData{fill:#13261f;stroke:#8aa490;stroke-width:1.4}.boxSoft{fill:#14271d;stroke:#597564;stroke-width:1.2}.title{font:600 28px Arial,Helvetica,sans-serif;fill:#f0efe3}.big{font:600 22px Arial,Helvetica,sans-serif;fill:#f0efe3}.label{font:600 16px Arial,Helvetica,sans-serif;fill:#f0efe3}.small{font:14px Arial,Helvetica,sans-serif;fill:#b6c8b5}.tiny{font:12px Arial,Helvetica,sans-serif;fill:#aab8ad}.cap{font:600 12px Arial,Helvetica,sans-serif;letter-spacing:1.8px;fill:#a2bb4e}.magenta{fill:#e1a3df}.cream{fill:#f0efe3}.muted{fill:#98ad9b}
+    </style>
+  </defs>
+  <rect class="bg" width="1600" height="1000"/>
+
+  <text x="60" y="56" class="cap">ETIKA  /  STORM HACKS 2026</text>
+  <line x1="60" y1="76" x2="1540" y2="76" class="rule"/>
+  <text x="60" y="126" class="title" style="font-size:42px">Data &amp; decision flow.</text>
+  <text x="62" y="157" class="small" style="font-size:17px">Personalized compliance guidance — evidence-grounded, code-decided, owner-controlled.</text>
+
+  <!-- stage labels -->
+  <text x="60" y="218" class="cap">01 · EXPERIENCE</text>
+  <text x="376" y="218" class="cap">02 · API &amp; TRUST LAYER</text>
+  <text x="1020" y="218" class="cap">03 · PERSISTED DATA</text>
+  <text x="1335" y="218" class="cap">04 · AI SERVICES</text>
+
+  <!-- experience -->
+  <rect x="60" y="242" width="260" height="548" rx="2" class="box"/>
+  <text x="84" y="282" class="big">Business owner</text>
+  <text x="84" y="306" class="small">New Vancouver sole proprietor</text>
+
+  <rect x="84" y="340" width="212" height="106" rx="2" class="boxSoft"/>
+  <text x="102" y="371" class="label">Intake wizard</text>
+  <text x="102" y="394" class="small">Facts, revenue, free text</text>
+  <text x="102" y="417" class="tiny">Owner confirms what is true</text>
+
+  <rect x="84" y="477" width="212" height="112" rx="2" class="boxSoft"/>
+  <text x="102" y="509" class="label">Compliance dashboard</text>
+  <text x="102" y="532" class="small">Readiness score · Now / Next / Later</text>
+  <text x="102" y="555" class="tiny">Sources, trace, follow-up answers</text>
+
+  <rect x="84" y="620" width="212" height="126" rx="2" class="boxSoft"/>
+  <text x="102" y="652" class="label">Ask &amp; take action</text>
+  <text x="102" y="675" class="small">Grounded chat · checklists</text>
+  <text x="102" y="698" class="small">Inquiry email draft</text>
+  <text x="102" y="721" class="tiny">Owner reviews and sends themselves</text>
+
+  <!-- api -->
+  <rect x="376" y="242" width="596" height="548" rx="2" class="boxData"/>
+  <text x="400" y="282" class="big">Next.js → FastAPI</text>
+  <text x="400" y="306" class="small">Typed routes, Pydantic contracts and explicit confirmation steps</text>
+
+  <rect x="400" y="340" width="252" height="118" rx="2" class="boxAI"/>
+  <text x="420" y="371" class="label">Intake parser</text>
+  <text x="420" y="394" class="small">Turns optional free text into</text>
+  <text x="420" y="415" class="small">proposed facts — never applies them</text>
+  <text x="420" y="438" class="tiny magenta">Gemini: extract only</text>
+
+  <rect x="684" y="340" width="264" height="118" rx="2" class="box"/>
+  <text x="704" y="371" class="label">Profile versioning</text>
+  <text x="704" y="394" class="small">Confirmed edits create a new</text>
+  <text x="704" y="415" class="small">immutable business profile</text>
+  <text x="704" y="438" class="tiny">Unknown ≠ false</text>
+
+  <rect x="400" y="498" width="548" height="126" rx="2" class="box"/>
+  <text x="420" y="531" class="label">Deterministic assessment engine</text>
+  <text x="420" y="554" class="small">Evaluates applicability · runs PST/GST calculators · sequences dependencies · scores readiness</text>
+  <text x="420" y="580" class="tiny cream">Code alone decides what applies, status and score. AI cannot override it.</text>
+
+  <rect x="400" y="664" width="262" height="102" rx="2" class="boxAI"/>
+  <text x="420" y="696" class="label">Specialist orchestrator</text>
+  <text x="420" y="719" class="small">Registrar · Counter · Foreman</text>
+  <text x="420" y="742" class="tiny magenta">Explains findings from evidence</text>
+
+  <rect x="686" y="664" width="262" height="102" rx="2" class="boxAI"/>
+  <text x="706" y="696" class="label">Grounded chat</text>
+  <text x="706" y="719" class="small">Routes a question to one specialist</text>
+  <text x="706" y="742" class="tiny magenta">Can propose, never silently change, facts</text>
+
+  <!-- data -->
+  <rect x="1020" y="242" width="270" height="548" rx="2" class="boxData"/>
+  <text x="1042" y="282" class="big">TiDB Cloud</text>
+  <text x="1042" y="306" class="small">One relational + vector store</text>
+
+  <rect x="1042" y="340" width="226" height="104" rx="2" class="boxSoft"/>
+  <text x="1058" y="369" class="label">Business state</text>
+  <text x="1058" y="392" class="tiny">business_profiles · revenue_entries</text>
+  <text x="1058" y="413" class="tiny">proposed_updates</text>
+
+  <rect x="1042" y="470" width="226" height="126" rx="2" class="boxSoft"/>
+  <text x="1058" y="500" class="label">Verified knowledge</text>
+  <text x="1058" y="523" class="tiny">requirements registry + official</text>
+  <text x="1058" y="544" class="tiny">knowledge chunks + embeddings</text>
+  <text x="1058" y="568" class="tiny">filtered by area / jurisdiction / review</text>
+
+  <rect x="1042" y="622" width="226" height="144" rx="2" class="boxSoft"/>
+  <text x="1058" y="652" class="label">Audit &amp; resilience</text>
+  <text x="1058" y="675" class="tiny">findings · agent_runs · conversations</text>
+  <text x="1058" y="696" class="tiny">finding_cache · assessment_cache</text>
+  <text x="1058" y="721" class="tiny">Citations and tool traces stay inspectable</text>
+
+  <!-- AI -->
+  <rect x="1335" y="242" width="205" height="548" rx="2" class="boxAI"/>
+  <text x="1357" y="282" class="big">Gemini</text>
+  <text x="1357" y="306" class="small">Bounded AI roles</text>
+  <rect x="1357" y="348" width="161" height="130" rx="2" class="boxSoft"/>
+  <text x="1373" y="379" class="label">Structured outputs</text>
+  <text x="1373" y="403" class="tiny">• intake fact proposals</text>
+  <text x="1373" y="425" class="tiny">• agent explanations</text>
+  <text x="1373" y="447" class="tiny">• cited chat answers</text>
+  <text x="1373" y="469" class="tiny">• no autonomous actions</text>
+  <rect x="1357" y="514" width="161" height="104" rx="2" class="boxSoft"/>
+  <text x="1373" y="545" class="label">Embeddings</text>
+  <text x="1373" y="568" class="tiny">Query vectors for TiDB</text>
+  <text x="1373" y="590" class="tiny">semantic retrieval</text>
+  <text x="1357" y="668" class="tiny magenta">No independent legal decisions</text>
+  <text x="1357" y="690" class="tiny magenta">No invented source links</text>
+
+  <!-- connectors -->
+  <path d="M296 393 H400" class="line"/>
+  <text x="323" y="382" class="tiny">free text</text>
+  <path d="M296 393 H350 V399 H684" class="data"/>
+  <text x="506" y="330" class="tiny">owner-confirmed fields</text>
+  <path d="M652 399 H684" class="line"/>
+  <path d="M526 458 V498" class="line"/>
+  <text x="538" y="486" class="tiny">proposal accepted</text>
+  <path d="M816 458 V498" class="data"/>
+  <text x="831" y="485" class="tiny">profile facts</text>
+  <path d="M674 624 V664 H531" class="line"/>
+  <path d="M816 624 V664" class="line"/>
+  <path d="M948 715 H1020" class="data"/>
+  <path d="M662 715 H686" class="dash"/>
+  <path d="M948 715 H990 V533 H1020" class="line"/>
+  <text x="955" y="510" class="tiny">retrieve official evidence</text>
+  <path d="M948 548 H1020" class="data"/>
+  <text x="967" y="538" class="tiny">rules + registry</text>
+  <path d="M948 715 H990 V700 H1020" class="line"/>
+  <text x="974" y="748" class="tiny">findings / trace / cache</text>
+  <path d="M1290 533 H1335" class="data"/>
+  <text x="1295" y="521" class="tiny">vector query</text>
+  <path d="M1335 413 H1310 V812 H530 V766" class="line"/>
+  <text x="1010" y="827" class="tiny">structured explanation / answer</text>
+  <path d="M1335 590 H1290" class="line"/>
+  <path d="M400 715 H350 V533 H296" class="line"/>
+  <text x="304" y="519" class="tiny">score, cited plan, next steps</text>
+  <path d="M686 715 H350 V683 H296" class="line"/>
+  <text x="306" y="669" class="tiny">question / answer / proposed change</text>
+
+  <!-- bottom trust sequence -->
+  <line x1="60" y1="838" x2="1540" y2="838" class="rule"/>
+  <text x="60" y="880" class="cap">THE PITCH IN ONE LINE</text>
+  <text x="60" y="920" class="big" style="font-size:25px">Owner facts → deterministic rules → evidence-backed AI explanation → cited, sequenced action plan.</text>
+  <text x="60" y="955" class="small">Every material change is confirmed, versioned and reassessed; every explanation is constrained to current retrieved evidence.</text>
+</svg>
