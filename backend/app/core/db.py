@@ -6,8 +6,10 @@ Works with TiDB (``mysql+pymysql://...``, TLS required) and SQLite (local dev an
 import ssl
 from collections.abc import Iterator
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
+import certifi
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -63,6 +65,12 @@ def _tidb_url_and_tls_context(database_url: str) -> tuple[URL, ssl.SSLContext]:
     verify_identity = _as_bool(query.get("ssl_verify_identity"), "ssl_verify_identity")
     if not verify_cert or not verify_identity:
         raise ValueError("TiDB Cloud requires certificate and hostname verification")
+
+    if ca_file and not ca_path and not Path(ca_file).exists():
+        # The TiDB Console suggests an OS-specific bundle (e.g. macOS's /etc/ssl/cert.pem) that is
+        # absent on other platforms, so one shared DATABASE_URL cannot name a path valid everywhere.
+        # certifi trusts the same public CAs, so verification stays on.
+        ca_file = certifi.where()
 
     cleaned_query = {key: value for key, value in query.items() if key not in _TIDB_TLS_QUERY_KEYS}
     return url.set(query=cleaned_query), ssl.create_default_context(cafile=ca_file, capath=ca_path)
