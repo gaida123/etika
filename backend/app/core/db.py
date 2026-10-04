@@ -9,6 +9,7 @@ from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import Engine, create_engine
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -19,6 +20,54 @@ class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
 
+_TIDB_TLS_QUERY_KEYS = frozenset(
+    {
+        "ssl_ca",
+        "ssl_capath",
+        "ssl_cert",
+        "ssl_key",
+        "ssl_cipher",
+        "ssl_check_hostname",
+        "ssl_verify_cert",
+        "ssl_verify_identity",
+    }
+)
+
+
+def _as_bool(value: str | bool | None, name: str) -> bool:
+    """Parse an optional URL boolean, rejecting ambiguous TLS settings."""
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    if value.lower() in {"1", "true", "yes"}:
+        return True
+    if value.lower() in {"0", "false", "no"}:
+        return False
+    raise ValueError(f"{name} must be true or false")
+
+
+def _tidb_url_and_tls_context(database_url: str) -> tuple[URL, ssl.SSLContext]:
+    """Build one verified TLS context from a TiDB Cloud SQLAlchemy URL.
+
+    SQLAlchemy translates ``ssl_ca`` in a URL into a nested PyMySQL ``ssl`` dictionary.
+    Passing another ``ssl`` object through ``connect_args`` can overwrite that dictionary.
+    Consume the Console-provided TLS options here instead, then pass PyMySQL exactly one
+    verified context.
+    """
+    url = make_url(database_url)
+    query = dict(url.query)
+    ca_file = query.get("ssl_ca")
+    ca_path = query.get("ssl_capath")
+    verify_cert = _as_bool(query.get("ssl_verify_cert"), "ssl_verify_cert")
+    verify_identity = _as_bool(query.get("ssl_verify_identity"), "ssl_verify_identity")
+    if not verify_cert or not verify_identity:
+        raise ValueError("TiDB Cloud requires certificate and hostname verification")
+
+    cleaned_query = {key: value for key, value in query.items() if key not in _TIDB_TLS_QUERY_KEYS}
+    return url.set(query=cleaned_query), ssl.create_default_context(cafile=ca_file, capath=ca_path)
+
+
 def make_engine(database_url: str) -> Engine:
     """Build an engine with the right options for SQLite or TiDB/MySQL."""
     kwargs: dict[str, Any] = {}
@@ -27,8 +76,10 @@ def make_engine(database_url: str) -> Engine:
         if ":memory:" in database_url or database_url in ("sqlite://", "sqlite:///"):
             kwargs["poolclass"] = StaticPool
     elif database_url.startswith("mysql"):
-        # TiDB Cloud only accepts TLS connections; verify against the system CA store.
-        kwargs["connect_args"] = {"ssl": ssl.create_default_context()}
+        # TiDB Cloud only accepts TLS connections. Normalize the Console URL's TLS
+        # parameters first so PyMySQL receives one verified SSL context.
+        database_url, tls_context = _tidb_url_and_tls_context(database_url)
+        kwargs["connect_args"] = {"ssl": tls_context}
         kwargs["pool_pre_ping"] = True
         kwargs["pool_recycle"] = 300
     return create_engine(database_url, **kwargs)
