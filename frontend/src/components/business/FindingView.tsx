@@ -332,7 +332,7 @@ export function FindingView({ requirementId }: { requirementId: string }) {
             <span className="muted text-[13px]">
               {insufficientEvidence
                 ? "No official action is shown for an unsupported requirement."
-                : `${verified ? `Link verified ${verified}. ` : ""}Opens the official site. etika doesn&apos;t submit anything for you.`}
+                : `${verified ? `Link verified ${verified}. ` : ""}Opens the official site. etika doesn't submit anything for you.`}
             </span>
             {emailError && (
               <p className="m-0 text-[13px] text-[#a3341f]" role="alert">
