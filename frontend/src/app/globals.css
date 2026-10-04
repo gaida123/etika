@@ -500,9 +500,25 @@
       transform: rotate(360deg);
     }
   }
+  /* A spinner is the only sign that work is still happening, so reduced motion slows it down
+     rather than stopping it: a frozen ring reads as a hang. */
   @media (prefers-reduced-motion: reduce) {
-    .spin {
-      animation: none;
+    .spin,
+    .ck-spin {
+      animation-duration: 1.8s;
+    }
+  }
+
+  /* Chat loader to answer. Opacity only, so it stays on under reduced motion. */
+  .fade-in {
+    animation: ck-fade 0.3s ease both;
+  }
+  .fade-out {
+    animation: fade-out 0.2s ease both;
+  }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
     }
   }
 
@@ -795,7 +811,6 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .ck-spin,
     .ck-conn.on::after,
     .ck-find,
     .ck-find-fade,

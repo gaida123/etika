@@ -64,20 +64,31 @@ function Answer({
 }) {
   const { questions, rows, businessId } = useBusiness();
   const r = turn.response;
+  const ready = Boolean(r || turn.error);
+  // A turn that already had its answer when it mounted shows it at once. A live one fades the
+  // loader out first, then fades the answer in.
+  const [shown, setShown] = useState(ready);
+  const [fadeAnswer] = useState(!ready);
+  useEffect(() => {
+    if (!ready || shown) return;
+    const t = setTimeout(() => setShown(true), 200);
+    return () => clearTimeout(t);
+  }, [ready, shown]);
 
   const body = (() => {
+    if (!shown)
+      return (
+        <p className={`muted m-0 flex items-center gap-2 text-sm ${ready ? "fade-out" : "fade-in"}`} aria-live="polite">
+          <span className="spin" /> Checking official sources…
+        </p>
+      );
     if (turn.error)
       return (
         <p className="m-0 text-sm text-[#a3341f]" role="alert">
           {turn.error}
         </p>
       );
-    if (!r)
-      return (
-        <p className="muted m-0 flex items-center gap-2 text-sm" aria-live="polite">
-          <span className="spin" /> Checking official sources…
-        </p>
-      );
+    if (!r) return null;
 
     if (r.insufficient_evidence)
       return (
@@ -123,20 +134,27 @@ function Answer({
     );
   })();
 
+  const content = shown && fadeAnswer ? <div className="fade-in">{body}</div> : body;
+  const proposal = shown && r && turn.proposal && (
+    <div className={fadeAnswer ? "fade-in" : undefined}>
+      <ProposalCard turn={turn} />
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-4">
       {variant === "full" ? (
         <div className="flex items-start gap-3">
           <LogoMark size={20} className="mt-[3px]" />
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            {body}
-            {r && turn.proposal && <ProposalCard turn={turn} />}
+            {content}
+            {proposal}
           </div>
         </div>
       ) : (
         <>
-          {body}
-          {r && turn.proposal && <ProposalCard turn={turn} />}
+          {content}
+          {proposal}
         </>
       )}
     </div>
