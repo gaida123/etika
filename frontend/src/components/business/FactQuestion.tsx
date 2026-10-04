@@ -39,6 +39,8 @@ export function FactQuestion({ question, variant }: { question: FollowUpQuestion
   });
   const [text, setText] = useState("");
   const [revenue, setRevenue] = useState<Record<string, string>>({});
+  // The choice the owner clicked, held highlighted until the save and re-check finish.
+  const [picked, setPicked] = useState<string | null>(null);
   const busy = state.kind === "saving" || rechecking;
 
   const unlocks = question.needed_for
@@ -52,6 +54,8 @@ export function FactQuestion({ question, variant }: { question: FollowUpQuestion
       setState({ kind: "idle" });
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : "Couldn't save. Try again." });
+    } finally {
+      setPicked(null);
     }
   }
 
@@ -64,9 +68,13 @@ export function FactQuestion({ question, variant }: { question: FollowUpQuestion
         <button
           key={c.label}
           type="button"
-          className={btn}
+          className={`${btn} ${picked === c.label ? "pick-on" : ""}`}
+          aria-pressed={picked === c.label}
           disabled={busy}
-          onClick={() => save({ facts: { [question.fact_key]: c.value } })}
+          onClick={() => {
+            setPicked(c.label);
+            save({ facts: { [question.fact_key]: c.value } });
+          }}
         >
           {c.label}
         </button>
@@ -118,7 +126,8 @@ export function FactQuestion({ question, variant }: { question: FollowUpQuestion
       {question.answer_type !== "monthly_revenue" && (
         <button
           type="button"
-          className={variant === "card" ? "btn btn-s btn-soft" : "opt opt-s cursor-pointer"}
+          className={`${variant === "card" ? "btn btn-s btn-soft" : "opt opt-s cursor-pointer"} ${state.kind === "unsure" ? "pick-on" : ""}`}
+          aria-pressed={state.kind === "unsure"}
           disabled={busy}
           onClick={() => setState({ kind: "unsure" })}
         >
