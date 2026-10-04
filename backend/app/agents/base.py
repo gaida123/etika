@@ -7,7 +7,7 @@ Phase 3 puts the per-requirement finding cache in front of that: requirements wh
 unchanged are answered from TiDB, and only the rest reach the single call (none means none).
 
 Legacy mode (``AGENT_MODE=legacy``): the original two-phase run, a Gemini tool loop followed by a
-report call. Unchanged, and still used by chat (which calls ``investigate`` directly).
+report call. Unchanged. Chat no longer uses the tool loop; it gathers evidence in code too.
 
 In both modes applicability, status, score and scope come from code, never from the model.
 """

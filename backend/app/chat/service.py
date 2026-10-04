@@ -1,8 +1,8 @@
 """Grounded chat (D2-10).
 
-Route to one agent, run the same tool loop and citation rules as the assessment (so chat and
-dashboard never disagree), answer in one structured call that also proposes any new facts, and
-store the turn. Proposed facts are only applied after the owner confirms them.
+Route to one agent, gather its evidence in code and apply the same citation rules as the
+assessment (so chat and dashboard never disagree), answer in one structured call that also
+proposes any new facts, and store the turn. Proposed facts are only applied after the owner confirms them.
 """
 
 import uuid
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.agents.base import BaseAgent, facts_summary
 from app.agents.orchestrator import Orchestrator, employer_mode
 from app.agents.schemas import AgentRunOutput
-from app.agents.tools import AgentToolbox
+from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
 from app.chat.citations import supported_claims
 from app.chat.router import route_question
 from app.chat.schemas import ChatAnswerDraft, ChatResponse
@@ -77,7 +77,7 @@ async def answer_question(
     toolbox = AgentToolbox(agent_name, conversation_id, profile, services, output, agent.tool_names)
     history = _history(session, profile.business_id)
 
-    await agent.investigate(toolbox, _investigate_prompt(agent, output, profile, question, history), mode)
+    _gather_evidence(agent, toolbox, output, question)
     draft = await generate_structured(
         prompt=_answer_prompt(output, profile, question, history),
         system=f"{agent.system_prompt(mode)}\n\n{ANSWER_RULES}",
@@ -89,7 +89,9 @@ async def answer_question(
     insufficient = not claims
     answer = insufficient_answer(agent_name) if insufficient else draft.answer
     cited = dict.fromkeys(cid for c in claims for cid in c.chunk_ids)
-    sources = [SourceLink(title=output.retrieved[c].title, url=output.retrieved[c].url) for c in cited]
+    # Several cited chunks can come from one page; list each page once.
+    pages = {(output.retrieved[c].title, output.retrieved[c].url): None for c in cited}
+    sources = [SourceLink(title=title, url=url) for title, url in pages]
 
     proposed, _dropped = validate_extraction(draft.proposed_facts)
     proposal_id = save_proposal(session, profile.business_id, proposed, source="chat") if proposed else None
@@ -147,23 +149,25 @@ def _history_text(history: list[tuple[str, str]]) -> str:
     return f"Recent conversation (context only):\n{turns}\n\n"
 
 
-def _investigate_prompt(
-    agent: BaseAgent, output: AgentRunOutput, profile: BusinessProfile, question: str, history: list[tuple[str, str]]
-) -> str:
-    lines = [_history_text(history) + f"<owner_question>\n{question}\n</owner_question>", "", "Requirements in your area:"]
-    for a in output.scope:
-        req = agent.services.registry.get(a.requirement_id)
+def _gather_evidence(agent: BaseAgent, toolbox: AgentToolbox, output: AgentRunOutput, question: str) -> None:
+    """Code gathers the evidence for the routed agent's scope. Zero Gemini generation calls.
+
+    This used to be a Gemini tool loop, and the model could spend its whole budget on calculators
+    and requirement lookups without ever retrieving evidence, so a broad question ("do I need to
+    pay GST?") always came back as insufficient evidence. Each requirement is searched with the
+    owner's question and with its own title, all in one batched embedding call, and calculators
+    run in code. The answer call then sees everything and cites only what was retrieved here.
+    """
+    pairs: list[tuple[str, str]] = []
+    for applicability in output.scope:
+        req = agent.services.registry.get(applicability.requirement_id)
         if req is not None:
-            lines.append(f"- {req.id} {req.title} applicability: {a.status.value}")
-    lines += [
-        "",
-        "Owner facts:",
-        facts_summary(profile),
-        "",
-        "Call retrieve_evidence only for the requirement(s) relevant to the question, with a specific query. "
-        f"You have at most {agent.max_tool_calls} tool calls. When finished, reply with the single word DONE.",
-    ]
-    return "\n".join(lines)
+            pairs += [(req.id, f"{req.title}: {question}"), (req.id, req.title)]
+    if pairs:
+        toolbox.retrieve_evidence_many(pairs, source="chat")
+    if "get_calculator_result" in agent.tool_names:
+        for name in CALCULATOR_NAMES:
+            toolbox.call("get_calculator_result", {"name": name}, source="chat")
 
 
 def _answer_prompt(
