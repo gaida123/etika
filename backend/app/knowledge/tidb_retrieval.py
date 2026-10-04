@@ -9,6 +9,7 @@ retrieval contract.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -113,6 +114,158 @@ class TiDBRetrievalService:
             raise ValueError("approved_review_statuses must contain at least one status")
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
+        """Return filtered evidence for one request.
+
+        Keeping single retrieval as a one-item batch ensures the exact same filtering,
+        ranking, and semantic-fallback rules apply to both public entry points.
+        """
+        return self.retrieve_many([request])[0]
+
+    def retrieve_many(self, requests: Sequence[RetrievalRequest]) -> list[RetrievalResult]:
+        """Retrieve each request in order, coalescing eligible Gemini query embeddings.
+
+        TiDB still ranks every query independently, because each query needs its own
+        cosine-distance ordering.  The expensive remote embedding step is batched once
+        for all requests whose area has a complete vector backfill.  Every request is
+        subsequently passed through the same Python metadata gates as ``retrieve``.
+        """
+        ordered = list(requests)
+        if not ordered:
+            return []
+
+        semantic_embeddings: dict[int, Sequence[float]] = {}
+        semantic_unavailable: set[int] = set()
+        incomplete_areas: set[str | None] = set()
+        coverage_error_areas: set[str | None] = set()
+
+        if self._use_semantic:
+            coverage: dict[str | None, bool] = {}
+            # Invalid requests return before ranking; do not make an unnecessary
+            # database coverage check just because they share this batch.
+            for area in {
+                request.area for request in ordered if request.limit > 0 and request.jurisdiction_ids
+            }:
+                try:
+                    coverage[area] = self._semantic_coverage_is_complete(area)
+                except (SQLAlchemyError, ValueError):
+                    coverage[area] = False
+                    coverage_error_areas.add(area)
+
+            embed_indexes = [
+                index
+                for index, request in enumerate(ordered)
+                if request.limit > 0 and request.jurisdiction_ids and coverage[request.area]
+            ]
+            for area, complete in coverage.items():
+                if not complete:
+                    incomplete_areas.add(area)
+            if embed_indexes:
+                try:
+                    if self._embedding_provider is None:
+                        raise EmbeddingUnavailable("Semantic embedding provider is not configured")
+                    vectors = self._embedding_provider.embed_many(
+                        [ordered[index].query for index in embed_indexes]
+                    )
+                    if len(vectors) != len(embed_indexes):
+                        raise EmbeddingUnavailable("Embedding provider returned an unexpected embedding count")
+                    semantic_embeddings = dict(zip(embed_indexes, vectors, strict=True))
+                except (EmbeddingUnavailable, ValueError):
+                    semantic_unavailable.update(embed_indexes)
+
+        results: list[RetrievalResult] = []
+        for index, request in enumerate(ordered):
+            filters = self._filters(request)
+            limitations = self._base_limitations()
+            if request.limit <= 0:
+                results.append(
+                    self._insufficient(
+                        request, filters, limitations + ["The requested result limit is zero."]
+                    )
+                )
+                continue
+            if not request.jurisdiction_ids:
+                results.append(
+                    self._insufficient(
+                        request,
+                        filters,
+                        limitations + ["No jurisdiction IDs were supplied, so no evidence was eligible."],
+                    )
+                )
+                continue
+
+            semantic_enabled = index in semantic_embeddings
+            try:
+                if self._use_semantic and request.area in coverage_error_areas:
+                    candidates = self._load_candidates(request.area)
+                    limitations.append(
+                        "Semantic TiDB ranking was unavailable for this request; lexical fallback was used."
+                    )
+                elif self._use_semantic and request.area in incomplete_areas:
+                    candidates = self._load_candidates(request.area)
+                    limitations.append(
+                        "Vector backfill is incomplete for this area; lexical fallback was used."
+                    )
+                elif semantic_enabled:
+                    candidates = self._load_candidates(request.area, semantic_embeddings[index])
+                    if not candidates:
+                        semantic_enabled = False
+                        candidates = self._load_candidates(request.area)
+                        limitations.append(
+                            "No matching vector-backed chunks were available; lexical fallback was used."
+                        )
+                else:
+                    candidates = self._load_candidates(request.area)
+                    if self._use_semantic and index in semantic_unavailable:
+                        limitations.append(
+                            "Semantic TiDB ranking was unavailable for this request; lexical fallback was used."
+                        )
+            except (EmbeddingUnavailable, SQLAlchemyError, ValueError):
+                semantic_enabled = False
+                candidates = self._load_candidates(request.area)
+                limitations.append(
+                    "Semantic TiDB ranking was unavailable for this request; lexical fallback was used."
+                )
+            if semantic_enabled:
+                filters["ranking"] = "semantic_vector"
+                limitations[0] = "TiDB cosine-distance semantic ranking is in use."
+            results.append(self._rank_candidates(request, candidates, filters, limitations, semantic_enabled))
+        return results
+
+    def knowledge_base_version(self) -> str:
+        """Digest the current corpus identity for cache invalidation.
+
+        A cache entry must become stale when a current chunk is added, removed, or its
+        source version changes.  Sorting in Python makes the digest independent of the
+        database's result order and follows the frozen handoff contract exactly.
+        """
+        rows = self._execute_mappings(
+            text(
+                """
+                SELECT chunk_id, source_version
+                FROM knowledge_chunks
+                WHERE is_current = :is_current
+                """
+            ),
+            {"is_current": True},
+        )
+        pairs = sorted(
+            (
+                _required_string(row.get("chunk_id"), "chunk_id"),
+                _as_nonempty_string(row.get("source_version")) or "",
+            )
+            for row in rows
+        )
+        payload = json.dumps(pairs, ensure_ascii=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _rank_candidates(
+        self,
+        request: RetrievalRequest,
+        candidates: Sequence[Mapping[str, Any]],
+        filters: dict[str, Any],
+        limitations: list[str],
+        semantic_enabled: bool,
+    ) -> RetrievalResult:
         """Return filtered evidence, or an explicit insufficient-evidence result.
 
         A requirement-scoped request is eligible only when a chunk maps to that
@@ -120,46 +273,6 @@ class TiDBRetrievalService:
         switch is enabled.  An unscoped request needs lexical query overlap so that a
         random query does not receive every chunk in the requested area.
         """
-        filters = self._filters(request)
-        limitations = self._base_limitations()
-        if request.limit <= 0:
-            return self._insufficient(request, filters, limitations + ["The requested result limit is zero."])
-        if not request.jurisdiction_ids:
-            return self._insufficient(
-                request,
-                filters,
-                limitations + ["No jurisdiction IDs were supplied, so no evidence was eligible."],
-            )
-
-        semantic_enabled = False
-        try:
-            if self._use_semantic and not self._semantic_coverage_is_complete(request.area):
-                # A partial backfill must never hide evidence that has not yet received
-                # a vector. Keep the known-safe lexical ranking until this area is complete.
-                candidates = self._load_candidates(request.area)
-                limitations.append(
-                    "Vector backfill is incomplete for this area; lexical fallback was used."
-                )
-            else:
-                query_embedding = self._query_embedding(request.query)
-                semantic_enabled = query_embedding is not None
-                candidates = self._load_candidates(request.area, query_embedding)
-                if semantic_enabled and not candidates:
-                    semantic_enabled = False
-                    candidates = self._load_candidates(request.area)
-                    limitations.append(
-                        "No matching vector-backed chunks were available; lexical fallback was used."
-                    )
-        except (EmbeddingUnavailable, SQLAlchemyError, ValueError):
-            # A temporary Gemini 429 or a partially deployed vector migration must
-            # not turn a grounded evidence request into an application error.
-            candidates = self._load_candidates(request.area)
-            limitations.append(
-                "Semantic TiDB ranking was unavailable for this request; lexical fallback was used."
-            )
-        if semantic_enabled:
-            filters["ranking"] = "semantic_vector"
-            limitations[0] = "TiDB cosine-distance semantic ranking is in use."
         requested_jurisdictions = set(request.jurisdiction_ids)
         requested_requirements = set(request.requirement_ids)
         as_of = _normalise_datetime(request.as_of)
