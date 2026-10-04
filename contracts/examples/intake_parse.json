@@ -1,0 +1,23 @@
+{
+  "request": {
+    "text": "I'm Maya Chen. I make candles in my Vancouver apartment and sell them as Wick & Co on Etsy and at weekend markets.",
+    "business_id": "8fd0909a-35d7-45e0-9702-89be3ba99e87"
+  },
+  "response": {
+    "proposal_id": "3c1f6b2e-0a57-4d0e-9a39-2f4d1c7e8b10",
+    "proposed_facts": [
+      {"key": "legal_name", "value": "Maya Chen", "confidence": 0.95, "evidence": "I'm Maya Chen", "confirmed": false},
+      {"key": "trading_name", "value": "Wick & Co", "confidence": 0.95, "evidence": "sell them as Wick & Co", "confirmed": false},
+      {"key": "operates_in_vancouver", "value": true, "confidence": 0.9, "evidence": "my Vancouver apartment", "confirmed": false},
+      {"key": "home_based", "value": true, "confidence": 0.9, "evidence": "in my Vancouver apartment", "confirmed": false},
+      {"key": "sells", "value": "goods", "confidence": 0.85, "evidence": "I make candles", "confirmed": false},
+      {"key": "sells_at_recurring_markets", "value": true, "confidence": 0.85, "evidence": "at weekend markets", "confirmed": false}
+    ],
+    "dropped": []
+  },
+  "confirm_update_request": {
+    "proposal_id": "3c1f6b2e-0a57-4d0e-9a39-2f4d1c7e8b10",
+    "accepted": ["legal_name", "trading_name", "operates_in_vancouver", "home_based", "sells", "sells_at_recurring_markets"],
+    "edits": {"sells": "both"}
+  }
+}

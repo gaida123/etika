@@ -1,0 +1,31 @@
+{
+  "legal_name": "Maya Chen",
+  "trading_name": "Wick & Co",
+  "jurisdiction_ids": ["CA", "CA-BC", "CA-BC-VANCOUVER"],
+  "segment_id": "home_online_sole_prop",
+  "facts": {
+    "trading_name_differs_from_legal_name": {"value": true, "confirmed": true},
+    "operates_in_vancouver": {"value": true, "confirmed": true},
+    "home_based": {"value": true, "confirmed": true},
+    "online_only": {"value": false, "confirmed": true},
+    "sells": {"value": "both", "confirmed": true},
+    "has_established_premises": {"value": false, "confirmed": true},
+    "sells_at_recurring_markets": {"value": true, "confirmed": true},
+    "has_employees": {"value": false, "confirmed": true},
+    "plans_to_hire": {"value": null, "confirmed": false}
+  },
+  "monthly_revenue": [
+    {"month": "2025-10", "amount": 450},
+    {"month": "2025-11", "amount": 500},
+    {"month": "2025-12", "amount": 520},
+    {"month": "2026-01", "amount": 560},
+    {"month": "2026-02", "amount": 600},
+    {"month": "2026-03", "amount": 620},
+    {"month": "2026-04", "amount": 650},
+    {"month": "2026-05", "amount": 700},
+    {"month": "2026-06", "amount": 750},
+    {"month": "2026-07", "amount": 800},
+    {"month": "2026-08", "amount": 950},
+    {"month": "2026-09", "amount": 1100}
+  ]
+}
