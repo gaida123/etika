@@ -91,8 +91,19 @@ async def answer_question(
     answer = insufficient_answer(agent_name) if insufficient else draft.answer
     cited = dict.fromkeys(cid for c in claims for cid in c.chunk_ids)
     # Several cited chunks can come from one page; list each page once.
-    pages = {(output.retrieved[c].title, output.retrieved[c].url): None for c in cited}
-    sources = [SourceLink(title=title, url=url) for title, url in pages]
+    pages = {
+        (output.retrieved[c].title, output.retrieved[c].url): output.retrieved[c]
+        for c in cited
+    }
+    sources = [
+        SourceLink(
+            title=chunk.title,
+            url=chunk.url,
+            section_path=chunk.section_path,
+            retrieved_at=chunk.retrieved_at,
+        )
+        for chunk in pages.values()
+    ]
 
     proposed, _dropped = validate_extraction(draft.proposed_facts)
     proposal_id = save_proposal(session, profile.business_id, proposed, source="chat") if proposed else None

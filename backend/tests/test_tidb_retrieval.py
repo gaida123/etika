@@ -36,11 +36,18 @@ def corpus_engine() -> Engine:
         Column("mapped_requirement_ids", JSON, nullable=False),
         Column("review_status", String, nullable=False),
         Column("source_version", Text, nullable=True),
+        Column("retrieved_at", String, nullable=True),
         Column("effective_from", String, nullable=True),
         Column("effective_to", String, nullable=True),
         Column("is_current", Boolean, nullable=False),
         Column("embedding", String, nullable=True),
         Column("embedding_model", String, nullable=True),
+    )
+    requirements = Table(
+        "requirements",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("source_chunk_ids", JSON, nullable=False),
     )
     metadata.create_all(engine)
     with engine.begin() as connection:
@@ -111,6 +118,13 @@ def corpus_engine() -> Engine:
                 ),
             ],
         )
+        connection.execute(
+            requirements.insert(),
+            [
+                {"id": "TAX-01", "source_chunk_ids": ["mapped-approved"]},
+                {"id": "TAX-99", "source_chunk_ids": ["candidate-pending"]},
+            ],
+        )
     return engine
 
 
@@ -144,6 +158,7 @@ def _row(
         "mapped_requirement_ids": mapped or [],
         "review_status": review_status,
         "source_version": "2026-01-01",
+        "retrieved_at": "2026-10-01T00:00:00Z",
         "effective_from": effective_from,
         "effective_to": effective_to,
         "is_current": is_current,
@@ -172,13 +187,14 @@ def test_retrieves_only_current_approved_mapped_evidence(corpus_engine: Engine) 
     chunk = result.chunks[0]
     assert chunk.text.startswith("Small sellers")
     assert chunk.section_path == "PST > Small sellers"
+    assert chunk.retrieved_at == "2026-10-01T00:00:00Z"
     assert chunk.effective_from == datetime(2026, 1, 1, tzinfo=UTC)
     assert chunk.score and chunk.score > 0
     assert result.filters_applied["segment_filter_applied"] is False
     assert result.filters_applied["candidate_mapping_fallback_used"] is False
 
 
-def test_candidate_mappings_are_used_only_when_no_final_mapping_is_eligible(corpus_engine: Engine) -> None:
+def test_registry_source_tags_are_authoritative_for_requirement_evidence(corpus_engine: Engine) -> None:
     service = TiDBRetrievalService(
         corpus_engine,
         allow_unreviewed=True,
@@ -188,11 +204,24 @@ def test_candidate_mappings_are_used_only_when_no_final_mapping_is_eligible(corp
     mapped_result = service.retrieve(_request(requirement_ids=["TAX-01"]))
     assert [chunk.chunk_id for chunk in mapped_result.chunks] == ["mapped-approved"]
     assert mapped_result.filters_applied["candidate_mapping_fallback_used"] is False
+    assert mapped_result.filters_applied["requirement_source_tags_used"] is True
     candidate_result = service.retrieve(_request(requirement_ids=["TAX-99"]))
     assert candidate_result.status == "supported"
     assert [chunk.chunk_id for chunk in candidate_result.chunks] == ["candidate-pending"]
-    assert candidate_result.filters_applied["candidate_mapping_fallback_used"] is True
-    assert any("No finalized requirement mapping" in item for item in candidate_result.limitations)
+    assert candidate_result.filters_applied["candidate_mapping_fallback_used"] is False
+
+
+def test_an_empty_registry_source_tag_list_is_an_explicit_citation_gap(corpus_engine: Engine) -> None:
+    with corpus_engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO requirements (id, source_chunk_ids) VALUES (:id, :source_chunk_ids)"),
+            {"id": "REG-02", "source_chunk_ids": "[]"},
+        )
+
+    result = TiDBRetrievalService(corpus_engine).retrieve(_request(requirement_ids=["REG-02"]))
+
+    assert result.status == "insufficient_evidence"
+    assert result.chunks == []
 
 
 def test_unreviewed_or_candidate_rows_are_rejected_by_default(corpus_engine: Engine) -> None:
