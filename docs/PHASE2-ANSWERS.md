@@ -3,6 +3,12 @@
 This records decisions against `PHASE2-HANDOFF.md`. It does not modify Developer
 2's Phase 2 files.
 
+> Developer 2 note: every answer below is applied on
+> `feat/phase2-prefetch-single-call-agents`. See §5 of `PHASE2-HANDOFF.md` for
+> what changed per question, and §7 for what Phase 1 still owes
+> (`knowledge_base_version()`, `retrieve_many()`, `make_chunk_id`, reviewed
+> `action_url`s).
+
 ## Q1. `depends_on` collision
 
 **Decision:** use `Requirement.required_fact_keys` for profile fact dependencies.
