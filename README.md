@@ -1,4 +1,4 @@
-# Etika: Compliance, Decoded.
+# Etika: Legal Team, Decoded.
 
 > **Code decides. Gemini explains.**
 > A compliance navigator for new Vancouver, BC sole proprietors: three specialist AI agents check your situation against official government sources and tell you what applies to *you*, why, and what to do next.
