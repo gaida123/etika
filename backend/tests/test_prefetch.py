@@ -1,5 +1,6 @@
 """Phase 2: prefetch + single-call agents. Gemini and retrieval are faked; no live calls."""
 
+import asyncio
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from typing import Any
@@ -11,7 +12,7 @@ from google.genai import errors
 from app.agents.base import ESCALATION_TOOL_CALLS, UNKNOWN_FACT, BaseAgent
 from app.agents.orchestrator import Orchestrator
 from app.agents.retrieval_adapter import STUB_KB_VERSION, kb_version
-from app.agents.schemas import AgentRunOutput, FindingDraft
+from app.agents.schemas import AgentReport, AgentRunOutput, FindingDraft
 from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
 from app.contracts.assessment import ApplicabilityResult
 from app.contracts.facts import BusinessProfile
@@ -46,6 +47,26 @@ def plan_for(
 
 def prefetch_entries(output: AgentRunOutput) -> list:
     return [t for t in output.trace if t.tool_input.get("source") == "prefetch"]
+
+
+class SlowReportFake(FakeGemini):
+    """Yields during a report so concurrent report calls are observable in a route test."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_reports = 0
+        self.max_concurrent_reports = 0
+
+    async def structured(self, prompt: str, system: str, schema: Any) -> Any:
+        if schema is not AgentReport:
+            return await super().structured(prompt, system, schema)
+        self.active_reports += 1
+        self.max_concurrent_reports = max(self.max_concurrent_reports, self.active_reports)
+        try:
+            await asyncio.sleep(0.01)
+            return await super().structured(prompt, system, schema)
+        finally:
+            self.active_reports -= 1
 
 
 class CountingRetrieval:
@@ -196,6 +217,17 @@ def test_first_run_three_calls(client: TestClient, fake: FakeGemini, prefetch_mo
     assert len(body["findings"]) == 13
     assert all(a["error"] is None for a in body["agents"])
     assert all(a["tool_calls"] == 0 for a in body["agents"])
+
+
+def test_report_calls_are_serialized_per_assessment(client: TestClient, prefetch_mode: None) -> None:
+    fake = SlowReportFake()
+    use_fake(fake)
+
+    body = assess_maya(client)
+
+    assert all(a["error"] is None for a in body["agents"])
+    assert fake.reports == {"registration": 1, "tax": 1, "employer": 1}
+    assert fake.max_concurrent_reports == 1
 
 
 def test_employer_mode_instructions_survive(

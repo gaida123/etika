@@ -107,16 +107,18 @@ class BaseAgent:
         profile: BusinessProfile,
         scope: list[ApplicabilityResult],
         mode: str | None = None,
+        report_generator: StructuredGenerator | None = None,
     ) -> AgentRunOutput:
         """Prefetch then report in one call. Errors are captured on the output, never raised."""
+        write_report = report_generator or self.generate_structured
         if get_settings().agent_mode == "legacy":
-            return await self._run_legacy(assessment_id, profile, scope, mode)
+            return await self._run_legacy(assessment_id, profile, scope, mode, write_report)
 
         output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
         toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
         try:
             pack = await self.prefetch(toolbox, profile, scope, mode)
-            report = await self.generate_structured(
+            report = await write_report(
                 prompt=self._report_prompt_from_pack(pack),
                 system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
                 schema=AgentReport,
@@ -124,7 +126,7 @@ class BaseAgent:
             output.drafts = report.findings
             toolbox.log("report", {}, f"{len(report.findings)} draft finding(s)")
             if get_settings().escalation_enabled:
-                await self._escalate_weak_findings(toolbox, pack, output, mode)
+                await self._escalate_weak_findings(toolbox, pack, output, mode, write_report)
         except Exception as exc:  # noqa: BLE001  (any failure becomes a visible, non-fatal error)
             output.error = describe_error(exc)
             toolbox.log("error", {}, output.error)
@@ -136,13 +138,14 @@ class BaseAgent:
         profile: BusinessProfile,
         scope: list[ApplicabilityResult],
         mode: str | None,
+        write_report: StructuredGenerator,
     ) -> AgentRunOutput:
         """Pre-Phase-2 behaviour: a Gemini tool loop, then a report call."""
         output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
         toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
         try:
             await self.investigate(toolbox, self._investigate_prompt(output, profile), mode)
-            report = await self.generate_structured(
+            report = await write_report(
                 prompt=self._report_prompt(output, profile, mode),
                 system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
                 schema=AgentReport,
@@ -214,7 +217,12 @@ class BaseAgent:
     # --- escalation ---------------------------------------------------------------------------
 
     async def _escalate_weak_findings(
-        self, toolbox: AgentToolbox, pack: EvidencePack, output: AgentRunOutput, mode: str | None
+        self,
+        toolbox: AgentToolbox,
+        pack: EvidencePack,
+        output: AgentRunOutput,
+        mode: str | None,
+        write_report: StructuredGenerator,
     ) -> None:
         """One bounded investigate + re-report round for weak findings. Never raises.
 
@@ -236,7 +244,7 @@ class BaseAgent:
                 max_tool_calls=ESCALATION_TOOL_CALLS,
             )
             subset = self._refreshed(pack.subset(targets), output)
-            report = await self.generate_structured(
+            report = await write_report(
                 prompt=self._report_prompt_from_pack(subset),
                 system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
                 schema=AgentReport,

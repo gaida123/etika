@@ -2,7 +2,7 @@
 
 1. Code evaluates applicability.
 2. Pick agents: registration and tax always; employer full / pre-hire / skipped.
-3. Run active agents in parallel.
+3. Prefetch active agents in parallel, then serialize their Gemini report calls.
 4. Validate citations, set status from applicability (code), merge flags.
 5. Score (Developer 1), enrich cards with sources and threshold progress, persist findings + trace.
 """
@@ -64,6 +64,7 @@ class Orchestrator:
         self, services: Services, generate: ContentGenerator, generate_structured: StructuredGenerator
     ) -> None:
         self.services = services
+        self.generate_structured = generate_structured
         self.agents: dict[str, BaseAgent] = {
             cls.name: cls(services, generate, generate_structured)
             for cls in (RegistrationAgent, TaxAgent, EmployerAgent)
@@ -91,16 +92,29 @@ class Orchestrator:
         assessment_id = str(uuid.uuid4())
         applicability = self.services.applicability.evaluate(profile)
         planned = self.plan(profile, applicability)
+        # Keep retrieval/prefetch concurrent, but avoid a burst of three large structured
+        # reports against one provider capacity pool. This gate also covers escalation
+        # re-reports in the same assessment.
+        report_gate = asyncio.Semaphore(1)
 
-        # Tests/stubs should stay fast. Live requests offset starts slightly so the three
-        # specialist reports do not hit Gemini in the exact same instant.
+        async def queued_report(*args: Any, **kwargs: Any) -> Any:
+            async with report_gate:
+                return await self.generate_structured(*args, **kwargs)
+
+        # Tests/stubs should stay fast. Live requests offset starts slightly so semantic
+        # retrieval batches do not hit Gemini in the exact same instant; report calls use
+        # the gate above.
         stagger_seconds = 0.0 if get_settings().use_stubs else get_settings().agent_start_stagger_seconds
         plan_entry = AgentTraceEntry(
             assessment_id=assessment_id,
             agent="orchestrator",
             step=0,
             tool_name="plan",
-            tool_input={"profile_version": profile.profile_version, "agent_start_stagger_seconds": stagger_seconds},
+            tool_input={
+                "profile_version": profile.profile_version,
+                "agent_start_stagger_seconds": stagger_seconds,
+                "report_concurrency": 1,
+            },
             tool_output_summary="running "
             + ", ".join(f"{a.name}" + (f" ({m})" if m else "") for a, _, m in planned),
         )
@@ -110,7 +124,7 @@ class Orchestrator:
         ) -> AgentRunOutput:
             if index and stagger_seconds > 0:
                 await asyncio.sleep(stagger_seconds * index)
-            return await agent.run(assessment_id, profile, scope, mode)
+            return await agent.run(assessment_id, profile, scope, mode, report_generator=queued_report)
 
         outputs: list[AgentRunOutput] = await asyncio.gather(
             *(run_staggered(index, agent, scope, mode) for index, (agent, scope, mode) in enumerate(planned))
