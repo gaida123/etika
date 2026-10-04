@@ -18,6 +18,7 @@ from google.genai import types
 
 from app.agents.finding_cache import CACHE, FindingCache
 from app.agents.models import EvidencePack, RequirementEvidence
+from app.agents.personas import Persona, check_voice, grounding, persona_for, template_summary, voice_block
 from app.agents.retrieval_adapter import (
     CHUNKS_PER_REQUIREMENT,
     Chunk,
@@ -27,7 +28,7 @@ from app.agents.retrieval_adapter import (
 )
 from app.agents.schemas import AgentName, AgentReport, AgentRunOutput, FindingDraft
 from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
-from app.contracts.assessment import ApplicabilityResult
+from app.contracts.assessment import ApplicabilityResult, ApplicabilityStatus
 from app.contracts.facts import BusinessProfile
 from app.core.llm import DEFAULT_TEMPERATURE, ContentGenerator, StructuredGenerator, describe_error
 from app.core.services import Services
@@ -124,17 +125,22 @@ class BaseAgent:
 
         output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
         toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
+        persona = persona_for(self.name)
+        voiced: str = ""
+        calculators: dict[str, Any] = {}
         try:
             reused = self._reuse_cached(toolbox, cache, profile, scope, mode)
             misses = [a for a in scope if a.requirement_id not in reused]
             if misses:
                 pack = await self.prefetch(toolbox, profile, misses, mode)
+                system = f"{self.system_prompt(mode)}\n\n{REPORT_RULES}"
+                if persona:
+                    system = f"{system}\n\n{voice_block(persona)}"
                 report = await write_report(
-                    prompt=self._report_prompt_from_pack(pack),
-                    system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
-                    schema=AgentReport,
+                    prompt=self._report_prompt_from_pack(pack), system=system, schema=AgentReport
                 )
                 output.drafts = report.findings
+                voiced, calculators = report.summary, pack.calculators
                 toolbox.log("report", {}, f"{len(report.findings)} draft finding(s)")
                 if get_settings().escalation_enabled:
                     await self._escalate_weak_findings(toolbox, pack, output, mode, write_report)
@@ -142,6 +148,7 @@ class BaseAgent:
             else:
                 toolbox.log("report", {}, "no Gemini request: every requirement was cached", source=CACHE)
             output.drafts = [*output.drafts, *reused.values()]
+            self._set_summary(toolbox, persona, voiced, calculators)
         except Exception as exc:  # noqa: BLE001  (any failure becomes a visible, non-fatal error)
             output.error = describe_error(exc)
             toolbox.log("error", {}, output.error)
@@ -158,15 +165,20 @@ class BaseAgent:
         """Pre-Phase-2 behaviour: a Gemini tool loop, then a report call."""
         output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
         toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
+        persona = persona_for(self.name)
+        system = f"{self.system_prompt(mode)}\n\n{REPORT_RULES}"
+        if persona:
+            system = f"{system}\n\n{voice_block(persona)}"
         try:
             await self.investigate(toolbox, self._investigate_prompt(output, profile), mode)
             report = await write_report(
-                prompt=self._report_prompt(output, profile, mode),
-                system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
-                schema=AgentReport,
+                prompt=self._report_prompt(output, profile, mode), system=system, schema=AgentReport
             )
             output.drafts = report.findings
             toolbox.log("report", {}, f"{len(report.findings)} draft finding(s)")
+            self._set_summary(
+                toolbox, persona, report.summary, {c.name: c.model_dump() for c in output.calculator_results.values()}
+            )
         except Exception as exc:  # noqa: BLE001  (any failure becomes a visible, non-fatal error)
             output.error = describe_error(exc)
             toolbox.log("error", {}, output.error)
@@ -285,6 +297,47 @@ class BaseAgent:
                 if cid in output.retrieved
             ]
             cache.store(self.name, req, applicability, profile, mode, draft, chunks)
+
+    # --- persona voice ------------------------------------------------------------------------
+
+    def _set_summary(
+        self,
+        toolbox: AgentToolbox,
+        persona: Persona | None,
+        voiced: str,
+        calculators: dict[str, Any],
+    ) -> None:
+        """Put one voiced line on the output, or the persona's template line (Phase 7.4/7.6).
+
+        The template is not a failure mode: a run where every finding came from the cache made no
+        Gemini request, so there is no voiced line to check and code writes it instead.
+        """
+        if persona is None:
+            return
+        output = toolbox.output
+        open_count = sum(1 for a in output.scope if a.status == ApplicabilityStatus.required_now)
+        undetermined = all(a.status == ApplicabilityStatus.undetermined for a in output.scope)
+        fallback = template_summary(persona, open_count, self._first_open_title(output), undetermined)
+
+        if not voiced:
+            output.summary, output.summary_source = fallback, "template"
+            return
+        ground = grounding(output.drafts, calculators, [open_count, len(output.scope)])
+        if check_voice(persona, voiced, ground):
+            output.summary, output.summary_source = voiced.strip(), "model"
+            return
+        output.summary, output.summary_source = fallback, "template"
+        toolbox.log("persona_voice", {"persona": persona.id}, "voiced summary rejected; using template line")
+
+    def _first_open_title(self, output: AgentRunOutput) -> str | None:
+        """Title of the first requirement the owner has to act on, for the template line."""
+        for a in output.scope:
+            if a.status != ApplicabilityStatus.required_now:
+                continue
+            req = self.services.registry.get(a.requirement_id)
+            if req is not None:
+                return req.title
+        return None
 
     # --- escalation ---------------------------------------------------------------------------
 

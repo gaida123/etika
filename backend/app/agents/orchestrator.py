@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session
 from app.agents.base import BaseAgent
 from app.agents.employer import EmployerAgent
 from app.agents.finding_cache import FindingCache
+from app.agents.personas import persona_for
 from app.agents.registration import RegistrationAgent
 from app.agents.retrieval_adapter import kb_version
-from app.agents.schemas import AgentRunOutput, AgentRunSummary, AssessmentResponse
+from app.agents.schemas import AgentRunOutput, AgentRunSummary, AssessmentResponse, PersonaInfo
 from app.agents.tax import TaxAgent
 from app.chat.citations import NO_SOURCE_FLAG, validate_citations
 from app.contracts.assessment import (
@@ -163,17 +164,7 @@ class Orchestrator:
             later=enrich(result.later),
             flags=result.flags,
             findings=findings,
-            agents=[
-                AgentRunSummary(
-                    agent=o.agent,
-                    mode=o.mode,
-                    tool_calls=o.tool_calls,
-                    findings=len(o.scope),
-                    cached_findings=o.cached_findings,
-                    error=o.error,
-                )
-                for o in outputs
-            ],
+            agents=[_summary_of(o) for o in outputs],
         )
 
     def _finding_cache(self, session: Session) -> FindingCache:
@@ -261,6 +252,33 @@ class Orchestrator:
                     "outcome": calc.outcome,
                 }
         return item.model_copy(update=update)
+
+
+def _summary_of(output: AgentRunOutput) -> AgentRunSummary:
+    """One agent's row in the response, including its persona (display only, Phase 7)."""
+    persona = persona_for(output.agent)
+    return AgentRunSummary(
+        agent=output.agent,
+        mode=output.mode,
+        tool_calls=output.tool_calls,
+        findings=len(output.scope),
+        cached_findings=output.cached_findings,
+        persona=(
+            PersonaInfo(
+                id=persona.id,
+                display_name=persona.display_name,
+                role_title=persona.role_title,
+                specialty=persona.specialty,
+                avatar=persona.avatar,
+            )
+            if persona
+            else None
+        ),
+        # A failed agent has nothing grounded to re-voice, so it says nothing in character.
+        summary="" if output.error else output.summary,
+        summary_source=output.summary_source,
+        error=output.error,
+    )
 
 
 def employer_mode(profile: BusinessProfile) -> str:

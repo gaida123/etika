@@ -35,8 +35,9 @@ from app.contracts.retrieval import RetrievedChunk
 from app.core.models import FindingCacheRow
 
 # Bump whenever the report prompt, the report rules or the draft schema change, so old answers
-# written by a different prompt can never be reused. Phase 7 (personas) bumps this.
-PROMPT_VERSION = "p2-prefetch-1"
+# written by a different prompt can never be reused. Personas are deliberately NOT in the key: the
+# cached draft is neutral, and the voiced summary is rebuilt in code on every run.
+PROMPT_VERSION = "p7-persona-1"
 
 CACHE = "cache"  # trace source marker for reused findings
 

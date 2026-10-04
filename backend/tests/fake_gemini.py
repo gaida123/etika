@@ -57,7 +57,9 @@ class FakeGemini:
         low_confidence_for: str | None = None,
         inject_status: bool = False,
         report_error: BaseException | None = None,
+        voiced_summary: str = "Here is where you stand, in my own words.",
     ) -> None:
+        self.voiced_summary = voiced_summary
         self.calls_per_turn = calls_per_turn
         self.fail_report_for = fail_report_for
         self.report_error = report_error
@@ -68,6 +70,7 @@ class FakeGemini:
         self.requests = 0
         self.reports: dict[str, int] = {}
         self.report_prompts: list[str] = []
+        self.report_systems: list[str] = []
 
     async def generate(
         self, contents: list[types.Content], config: types.GenerateContentConfig
@@ -107,6 +110,7 @@ class FakeGemini:
             raise self.report_error or RuntimeError("simulated Gemini outage")
         self.reports[agent] = self.reports.get(agent, 0) + 1
         self.report_prompts.append(prompt)
+        self.report_systems.append(system)
         confidence = 0.4 if agent == self.low_confidence_for else 0.9
         findings = []
         sections = SECTION_RE.split(prompt)[1:]
@@ -123,7 +127,7 @@ class FakeGemini:
                 )
             )
         findings.append(self._finding(requirement_id="EMP-99", explanation="out of scope", claims=[]))
-        return AgentReport(findings=findings)
+        return AgentReport(findings=findings, summary=self.voiced_summary)
 
     def _finding(
         self, requirement_id: str, explanation: str, claims: list[ClaimDraft], confidence: float = 1.0

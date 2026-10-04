@@ -18,6 +18,7 @@ from app.contracts.trace import AgentTraceEntry
 
 AgentName = Literal["registration", "tax", "employer"]
 EmployerMode = Literal["full", "pre_hire"]
+VoiceSource = Literal["model", "template"]
 
 
 class ClaimDraft(BaseModel):
@@ -41,6 +42,13 @@ class AgentReport(BaseModel):
     """Structured output of the report phase: one finding per in-scope requirement."""
 
     findings: list[FindingDraft]
+    summary: str = Field(
+        default="",
+        description=(
+            "1-2 sentences in the specialist's own voice, summarising the findings above for the "
+            "owner. Never adds a fact, number or date that is not already in those findings."
+        ),
+    )
 
 
 class AgentRunOutput(BaseModel):
@@ -57,7 +65,19 @@ class AgentRunOutput(BaseModel):
     trace: list[AgentTraceEntry] = Field(default_factory=list)
     tool_calls: int = 0
     cached_findings: int = 0
+    summary: str = ""
+    summary_source: VoiceSource = "template"
     error: str | None = None
+
+
+class PersonaInfo(BaseModel):
+    """The character behind one agent, for display only (Phase 7)."""
+
+    id: str
+    display_name: str
+    role_title: str
+    specialty: str
+    avatar: str
 
 
 class AgentRunSummary(BaseModel):
@@ -69,6 +89,13 @@ class AgentRunSummary(BaseModel):
     findings: int
     cached_findings: int = Field(
         default=0, description="Findings reused from the cache, so written with no Gemini request."
+    )
+    persona: PersonaInfo | None = None
+    summary: str = Field(
+        default="", description="The persona's voiced line. Never carries a claim of its own."
+    )
+    summary_source: VoiceSource = Field(
+        default="template", description="model when Gemini wrote it, template when code did."
     )
     error: str | None = None
 
