@@ -64,7 +64,23 @@ python scripts/warm_demo_cache.py     # cache Maya before/after hire (needs Gemi
 - `POST /dev/load-demo`: loads Maya from `contracts/examples/maya_profile.json` (only when `USE_STUBS=true`)
 
 Tables are created automatically on startup. With the default `DATABASE_URL=sqlite:///./reegal.db`
-nothing else is needed; for TiDB use `mysql+pymysql://user:pass@host:4000/db` (TLS is enabled automatically).
+nothing else is needed. For TiDB, copy the Console's PyMySQL URI into `backend/.env`; it uses
+`mysql+pymysql://<instance-prefix>.root:<url-encoded-password>@<host>:4000/<database>` and may include
+`ssl_ca`, `ssl_verify_cert=true`, and `ssl_verify_identity=true`. TLS is verified automatically.
+
+Verify the TiDB connection, negotiated TLS, and current schema bootstrap without making a Gemini call:
+
+```powershell
+python scripts/smoke_db.py
+```
+
+For staged testing of the live TiDB corpus while the other Developer 1 services remain stubs, set
+`USE_TIDB_RETRIEVAL=true` in `backend/.env` and run `python scripts/smoke_retrieval.py`. To use the
+backfilled Gemini/TiDB semantic path, also set `USE_TIDB_SEMANTIC_RETRIEVAL=true`. The one-time setup
+commands are `python scripts/migrate_vector_schema.py --apply`, then
+`python scripts/backfill_embeddings.py --apply`, then
+`python scripts/migrate_vector_schema.py --apply --create-index`. Do not set `USE_STUBS=false` until
+the real registry, applicability, calculator and scoring services are wired.
 
 ## Test
 
