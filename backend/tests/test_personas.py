@@ -5,12 +5,14 @@ field, it cannot smuggle a number or a promise past code, and it is still presen
 makes zero Gemini requests.
 """
 
+import json
 import re
 from collections.abc import Callable
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agents.base import render_numbers
 from app.agents.personas import (
     PERSONAS,
     THE_COUNTER,
@@ -177,3 +179,13 @@ def test_a_failed_agent_says_nothing_in_character(client: TestClient, no_finding
     assert rows(body)["tax"]["summary"] == ""
     assert rows(body)["tax"]["persona"]["display_name"] == "The Counter"  # the character is still named
     assert rows(body)["registration"]["summary"]  # unaffected agents still speak
+
+
+def test_calculator_amounts_reach_prompts_as_money() -> None:
+    numbers = {"rolling_12_month_total": 2690.0, "threshold": 10000.0, "window_end": "2026-09", "max_single_quarter": 2070.5}
+    assert render_numbers(numbers) == (
+        "rolling_12_month_total: $2,690; threshold: $10,000; window_end: 2026-09; max_single_quarter: $2,070.50"
+    )
+    # The voice check still matches a formatted amount against the raw calculator float.
+    ground = json.dumps({"numbers_used": numbers})
+    assert check_voice(THE_COUNTER, "You're at $2,690 of the $10,000 line.", ground)

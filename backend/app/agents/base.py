@@ -69,6 +69,7 @@ turn: work only from what is shown.
 - If the chunks shown do not support something you want to say, say instead that we could not find
   an official source for it.
 - Flag every gray area listed for a requirement that could apply to this owner. Never resolve one.
+- Write dollar amounts exactly as shown: dollar sign and commas, like $2,690 or $10,000.
 """
 
 
@@ -460,7 +461,7 @@ class BaseAgent:
             lines += [f"Mode: {pack.mode}", self.mode_instructions(pack.mode), ""]
         for name, calc in pack.calculators.items():
             lines.append(
-                f"Calculator {name}: {calc.get('outcome')}; numbers: {calc.get('numbers_used')}; "
+                f"Calculator {name}: {calc.get('outcome')}; numbers: {render_numbers(calc.get('numbers_used') or {})}; "
                 f"estimated crossing (estimate only): {calc.get('estimated_crossing')}"
             )
         if pack.calculators:
@@ -562,7 +563,7 @@ class BaseAgent:
                 lines.append(f"Missing facts: {', '.join(a.missing_facts)}")
             calc = output.calculator_results.get(req.trigger_rule or "")
             if calc:
-                lines.append(f"Calculator {calc.name}: {calc.outcome}; numbers: {calc.numbers_used}; "
+                lines.append(f"Calculator {calc.name}: {calc.outcome}; numbers: {render_numbers(calc.numbers_used)}; "
                              f"estimated crossing (estimate only): {calc.estimated_crossing}")
             for reason in output.flags.get(req.id, []):
                 lines.append(f"Flagged during investigation: {reason}")
@@ -584,6 +585,22 @@ def chunks_for(output: AgentRunOutput, requirement_id: str) -> list[Chunk]:
         for cid in list(chunk_ids)[:CHUNKS_PER_REQUIREMENT]
         if cid in output.retrieved
     ]
+
+
+def money(value: float) -> str:
+    """``2690.0`` -> ``$2,690``; cents only when there are any (``$2,690.50``)."""
+    return f"${value:,.0f}" if float(value).is_integer() else f"${value:,.2f}"
+
+
+def render_numbers(numbers: dict[str, Any]) -> str:
+    """Calculator numbers for a prompt, with every amount written as money.
+
+    Calculators return amounts as bare floats; shown raw, Gemini copies them as "2690.0". Every
+    float in ``numbers_used`` is a dollar amount (months are strings, flags are booleans).
+    """
+    return "; ".join(
+        f"{key}: {money(value) if isinstance(value, float) else value}" for key, value in numbers.items()
+    )
 
 
 def render_fact(fact: dict[str, Any]) -> str:

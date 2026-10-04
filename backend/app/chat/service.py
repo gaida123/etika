@@ -10,7 +10,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.base import BaseAgent, facts_summary
+from app.agents.base import BaseAgent, facts_summary, render_numbers
 from app.agents.orchestrator import Orchestrator, employer_mode
 from app.agents.schemas import AgentRunOutput
 from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
@@ -40,7 +40,8 @@ Answer the owner's question in 2-5 plain-English sentences, addressed to them as
 - If the evidence does not answer the question, say you could not find an official source.
 - Applicability shown was decided by our rules; never contradict or re-decide it.
 - Never mention URLs, fees, deadlines, form numbers or dollar amounts unless they appear in the
-  evidence text. Do not give advice beyond the evidence; gray areas go to a professional.
+  evidence text or the calculator lines. Write dollar amounts with a dollar sign and commas, like
+  $2,690 or $10,000. Do not give advice beyond the evidence; gray areas go to a professional.
 - proposed_facts: only facts the owner states about THEIR OWN business in this message (for
   example "I've hired a helper" -> has_employees "true"). Never guess; omit if unsure.
   Yes/no values are "true"/"false"; months are YYYY-MM.
@@ -177,7 +178,10 @@ def _answer_prompt(
     lines.append("Applicability (decided by our rules):")
     lines += [f"- {a.requirement_id}: {a.status.value}" for a in output.scope]
     for name, calc in output.calculator_results.items():
-        lines.append(f"Calculator {name}: {calc.outcome}; numbers: {calc.numbers_used}; estimated crossing: {calc.estimated_crossing}")
+        lines.append(
+            f"Calculator {name}: {calc.outcome}; numbers: {render_numbers(calc.numbers_used)}; "
+            f"estimated crossing: {calc.estimated_crossing}"
+        )
     lines.append("")
     if not output.retrieved:
         lines.append("Evidence: NONE FOUND.")
