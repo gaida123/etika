@@ -1,4 +1,4 @@
-# Reegal: Compliance Navigator
+# Etika: Compliance Navigator
 
 Compliance navigator for new Vancouver, BC sole proprietors. Spec: [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
@@ -47,6 +47,17 @@ uvicorn app.api.main:app --reload
 - `POST /profile`, `GET /profile/{business_id}[?version=N]`
 - `POST /intake/parse`: free text to proposed (unconfirmed) facts; with `business_id` it also stores a proposal
 - `POST /profile/{business_id}/confirm-update`: apply accepted/edited facts from a proposal as a new version
+- `POST /assess/{business_id}[?version=N]`: run the three agents; returns score, now/next/later, findings
+- `GET /assessments/{assessment_id}/trace`: every agent tool call (the "agent trace")
+- `GET /requirements/{requirement_id}`: registry entry (incl. action link) plus supporting evidence
+
+Live smoke scripts (real Gemini, stub knowledge base), run from `backend/`:
+
+```powershell
+python scripts/smoke_workflow.py      # health, intake, confirm-update
+python scripts/smoke_assess.py        # full Maya assessment
+python scripts/smoke_assess.py --hire # with a confirmed first hire (demo climax)
+```
 - `POST /dev/load-demo`: loads Maya from `contracts/examples/maya_profile.json` (only when `USE_STUBS=true`)
 
 Tables are created automatically on startup. With the default `DATABASE_URL=sqlite:///./reegal.db`
