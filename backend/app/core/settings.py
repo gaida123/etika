@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     use_stubs: bool = True
     agent_mode: Literal["prefetch", "legacy"] = "prefetch"  # prefetch: one Gemini call per agent
     escalation_enabled: bool = True  # one extra investigate+report round for weak findings
+    # Offset specialist launches slightly in live runs. This preserves the three independent
+    # agents while avoiding a simultaneous burst against a shared model capacity pool.
+    agent_start_stagger_seconds: float = 1.5
     # Lets us exercise the real TiDB corpus while the rest of Developer 1's services
     # are still stubs. This is a staging switch, not the production cutover switch.
     use_tidb_retrieval: bool = False
