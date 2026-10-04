@@ -3,7 +3,12 @@
 Investigate turn 1: retrieve_evidence for every requirement in the prompt (+ calculators for tax,
 + one flag and one out-of-scope call for registration). Turn 2: replies DONE.
 Report: one finding per requirement citing the evidence shown, plus one claim citing an invented
-chunk and one out-of-scope finding, so validation has something to remove.
+chunk and one out-of-scope finding, so validation has something to remove. The same parser handles
+the legacy report prompt and the Phase 2 prefetch prompt: both use ``## REQ-ID:`` headers and
+``Evidence [chunk_id]`` lines.
+
+``requests`` counts every Gemini request (tool turns and structured calls); ``reports`` counts
+structured report calls per agent, which is how the escalation cap is asserted.
 """
 
 import re
@@ -49,12 +54,20 @@ class FakeGemini:
         fail_report_for: str | None = None,
         classifier_choice: str = "registration",
         chat_without_evidence: bool = False,
+        low_confidence_for: str | None = None,
+        inject_status: bool = False,
+        report_error: BaseException | None = None,
     ) -> None:
         self.calls_per_turn = calls_per_turn
         self.fail_report_for = fail_report_for
+        self.report_error = report_error
         self.classifier_choice = classifier_choice
         self.chat_without_evidence = chat_without_evidence
+        self.low_confidence_for = low_confidence_for
+        self.inject_status = inject_status
         self.requests = 0
+        self.reports: dict[str, int] = {}
+        self.report_prompts: list[str] = []
 
     async def generate(
         self, contents: list[types.Content], config: types.GenerateContentConfig
@@ -91,7 +104,10 @@ class FakeGemini:
         assert schema is AgentReport
         agent = agent_of(system)
         if agent == self.fail_report_for:
-            raise RuntimeError("simulated Gemini outage")
+            raise self.report_error or RuntimeError("simulated Gemini outage")
+        self.reports[agent] = self.reports.get(agent, 0) + 1
+        self.report_prompts.append(prompt)
+        confidence = 0.4 if agent == self.low_confidence_for else 0.9
         findings = []
         sections = SECTION_RE.split(prompt)[1:]
         for req_id, body in zip(sections[0::2], sections[1::2]):
@@ -99,18 +115,30 @@ class FakeGemini:
             claims = [ClaimDraft(text=f"Official source says something about {req_id}.", chunk_ids=evidence[:1])]
             claims.append(ClaimDraft(text="Made-up claim.", chunk_ids=[INVENTED_CHUNK]))
             findings.append(
-                FindingDraft(
+                self._finding(
                     requirement_id=req_id,
                     explanation=f"Explanation for {req_id}.",
                     claims=claims if evidence else [],
-                    flags=[],
-                    confidence=0.9,
+                    confidence=confidence,
                 )
             )
-        findings.append(
-            FindingDraft(requirement_id="EMP-99", explanation="out of scope", claims=[], flags=[], confidence=1.0)
-        )
+        findings.append(self._finding(requirement_id="EMP-99", explanation="out of scope", claims=[]))
         return AgentReport(findings=findings)
+
+    def _finding(
+        self, requirement_id: str, explanation: str, claims: list[ClaimDraft], confidence: float = 1.0
+    ) -> FindingDraft:
+        """Build one draft, optionally trying to smuggle a status field past the schema."""
+        payload: dict[str, Any] = {
+            "requirement_id": requirement_id,
+            "explanation": explanation,
+            "claims": [c.model_dump() for c in claims],
+            "flags": [],
+            "confidence": confidence,
+        }
+        if self.inject_status:
+            payload["status"] = "done"
+        return FindingDraft.model_validate(payload)
 
     def _chat_answer(self, prompt: str) -> ChatAnswerDraft:
         evidence = [] if self.chat_without_evidence else EVIDENCE_RE.findall(prompt)

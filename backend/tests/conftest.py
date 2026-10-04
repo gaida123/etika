@@ -5,7 +5,7 @@ import os
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["USE_STUBS"] = "true"
 
-from collections.abc import Iterator  # noqa: E402
+from collections.abc import Callable, Iterator  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -15,6 +15,7 @@ from app.api.main import app  # noqa: E402
 from app.api.routes_dev import load_maya_fixture  # noqa: E402
 from app.contracts.facts import BusinessProfile  # noqa: E402
 from app.core.db import get_session, init_db, make_engine  # noqa: E402
+from app.core.settings import get_settings  # noqa: E402
 
 
 @pytest.fixture
@@ -46,3 +47,15 @@ def client(session_factory: sessionmaker[Session]) -> Iterator[TestClient]:
 @pytest.fixture
 def maya() -> BusinessProfile:
     return BusinessProfile(business_id="maya", profile_version=1, **load_maya_fixture().model_dump())
+
+
+@pytest.fixture
+def agent_mode(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Pin AGENT_MODE (and escalation) for one test, whatever the shipped default is."""
+
+    def set_mode(mode: str, escalation: bool = True) -> None:
+        settings = get_settings()
+        monkeypatch.setattr(settings, "agent_mode", mode)
+        monkeypatch.setattr(settings, "escalation_enabled", escalation)
+
+    return set_mode
