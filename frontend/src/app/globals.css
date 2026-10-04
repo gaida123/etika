@@ -336,8 +336,19 @@
     flex: 0 0 120px;
   }
   .c-st {
-    flex: 0 0 110px;
+    flex: 0 0 120px;
     font-size: 14px;
+  }
+  .c-src {
+    flex: 0 0 260px;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--color-muted);
+  }
+  @media (max-width: 1279px) {
+    .c-src {
+      display: none;
+    }
   }
   .colh {
     display: flex;

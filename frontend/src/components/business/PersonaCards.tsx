@@ -49,7 +49,7 @@ export function PersonaCards() {
         ))}
       </div>
 
-      <p className="muted m-0 text-[13px]">
+      <p className="muted m-0 max-w-[820px] text-[13px]">
         Each specialist has a name and a manner, nothing more: their wording never changes what
         applies to you, your status or the sources shown. {assessment.disclaimer} Confirm with the
         issuing office or a professional.
@@ -88,15 +88,17 @@ function PersonaCard({ agent, checked, plain }: { agent: AgentRun; checked: numb
         </p>
       )}
 
-      <div className="muted flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-line-soft pt-2.5 text-[13px]">
+      <div className="muted mt-auto flex flex-col items-start gap-1.5 border-t border-line-soft pt-2.5 text-[13px]">
         <span>
           {checked} {checked === 1 ? "requirement" : "requirements"} in {label.toLowerCase()}
         </span>
-        {agent.cached_findings > 0 && (
-          <span className="pill pill-mute h-[20px] text-xs font-normal">
-            {agent.cached_findings} unchanged since your last check
-          </span>
-        )}
+        {/* Always takes the line, hidden when empty, so every card's footer is the same height. */}
+        <span
+          className={`pill pill-mute h-[20px] text-xs font-normal ${agent.cached_findings > 0 ? "" : "invisible"}`}
+          aria-hidden={agent.cached_findings > 0 ? undefined : true}
+        >
+          {agent.cached_findings} unchanged since your last check
+        </span>
       </div>
     </article>
   );

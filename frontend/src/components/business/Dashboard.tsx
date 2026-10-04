@@ -47,13 +47,13 @@ export function Dashboard() {
   ];
 
   return (
-    <main className="inner flex max-w-[1040px] flex-col gap-9">
+    <main className="inner flex w-full max-w-none flex-col gap-9">
       <div>
         <p className="pre">
           {name}, checked {shortDate(assessment.cached_at ?? new Date().toISOString())} with{" "}
           {confirmedFactCount(profile)} confirmed facts
         </p>
-        <h1 className="hero">Your compliance check.</h1>
+        <h1 className="hero">The results:</h1>
         <p className="mt-5 mb-0 max-w-[720px] text-[17px]">
           These are the requirements that may apply to your business based on what you told us, each backed by an
           official source.{" "}
@@ -137,7 +137,7 @@ export function Dashboard() {
             <h2 id="next-h" className="m-0 text-[28px] leading-[1.2] font-medium tracking-[-0.025em]">
               {next.title}
             </h2>
-            {next.explanation && <p className="m-0">{next.explanation}</p>}
+            {next.explanation && <p className="m-0 max-w-[820px]">{next.explanation}</p>}
             {next.sources[0] && (
               <p className="muted m-0 text-sm">Source: {next.sources.map((src) => src.title).join("; ")}</p>
             )}
@@ -186,9 +186,14 @@ export function Dashboard() {
 
       <section id="all" aria-labelledby="all-h" className="flex scroll-mt-6 flex-col gap-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="all-h" className="sec">
-            All {rows.length} requirements
-          </h2>
+          <div>
+            <h2 id="all-h" className="sec">
+              All {rows.length} requirements
+            </h2>
+            <p className="muted mt-1 mb-0 text-sm">
+              Open any requirement for its steps and the official sources behind it.
+            </p>
+          </div>
           <div role="group" aria-label="Filter" className="flex flex-wrap gap-1.5">
             {filters.map((f) => (
               <button
@@ -285,8 +290,8 @@ function AreaGroup({
     .join(", ");
 
   return (
-    <div id={id} className="box scroll-mt-6 overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-panel px-5 py-3.5">
+    <details id={id} open className="fold box scroll-mt-6 overflow-hidden">
+      <summary className="flex flex-wrap items-center justify-between gap-2 bg-panel px-5 py-3.5">
         <h3 className="m-0 flex items-center gap-2 text-base font-medium">
           {label}
           {persona && (
@@ -296,8 +301,13 @@ function AreaGroup({
             </span>
           )}
         </h3>
-        <span className="muted text-sm">{summary}</span>
-      </div>
+        <span className="muted flex items-center gap-3 text-sm">
+          {summary}
+          <svg className="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </span>
+      </summary>
       {open.length > 0 && (
         <>
           <div className="colh" aria-hidden="true">
@@ -306,6 +316,7 @@ function AreaGroup({
             <span className="c-app">Applies to you</span>
             <span className="c-pri">Priority</span>
             <span className="c-st">Status</span>
+            <span className="c-src">Official source</span>
           </div>
           {open.map((r) => (
             <RequirementRow key={r.requirement_id} row={r} kind={kinds.get(r.requirement_id)!} base={`/b/${businessId}`} />
@@ -323,7 +334,7 @@ function AreaGroup({
           ))}
         </details>
       )}
-    </div>
+    </details>
   );
 }
 
@@ -332,7 +343,10 @@ function RequirementRow({ row, kind, base }: { row: Row; kind: Kind; base: strin
   const applies = appliesPill(row, kind);
   const priority = priorityPill(row, kind);
   const progress = progressOf(row, marks);
-  const detail = detailLine(row);
+  // The trigger line repeats what the explanation already says; the sales progress line does not.
+  const detail = row.progress || !row.explanation ? detailLine(row) : undefined;
+  // The same page can be cited more than once; list each source a single time.
+  const sources = [...new Map(row.sources.map((s) => [s.url || s.title, s])).values()];
   const dot =
     kind === "done" ? "dot dot-done" : kind === "input" ? "dot dot-dash" : progress === "in_progress" ? "dot dot-half" : "dot";
 
@@ -342,6 +356,11 @@ function RequirementRow({ row, kind, base }: { row: Row; kind: Kind; base: strin
       <span className="c-name">
         <span className="block font-medium">{row.title}</span>
         {detail && <span className="muted block text-[13px]">{detail}</span>}
+        {row.explanation && (
+          <span className="mt-0.5 line-clamp-2 block max-w-[720px] text-[13px] leading-[1.45] text-ink/80">
+            {row.explanation}
+          </span>
+        )}
         {row.progress && (
           <span className="mt-1.5 block h-1 max-w-[240px] overflow-hidden rounded-sm bg-line-soft" aria-hidden="true">
             <span
@@ -360,6 +379,13 @@ function RequirementRow({ row, kind, base }: { row: Row; kind: Kind; base: strin
           <span className="font-medium text-brand">Done</span>
         ) : (
           <span className="muted">{statusText(row, kind, marks)}</span>
+        )}
+      </span>
+      <span className="c-src">
+        {sources.length ? (
+          <span className="line-clamp-2">{sources.map((s) => s.title).join("; ")}</span>
+        ) : (
+          "—"
         )}
       </span>
     </Link>
