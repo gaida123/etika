@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # enough time to complete. Transient 429/503 recovery remains independently bounded
     # in ``app.core.llm``.
     gemini_request_timeout_ms: int = 60_000
+    # Generation requests allowed per rolling minute, across the whole process (0 = no limit).
+    # Set it a little under your key's limit: the free tier is a handful per minute, paid tiers
+    # far more. Calls wait for a slot instead of hitting 429s; chat and intake go first.
+    gemini_rpm: int = 60
+    # A call that would wait longer than this fails with a "busy" error instead of hanging.
+    gemini_max_wait_seconds: float = 45.0
     gemini_embedding_model: str = "gemini-embedding-001"
     # The configured model's live probe returned 3072 dimensions. This must match
     # TiDB's VECTOR(D) column and every document/query embedding.

@@ -45,6 +45,9 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> Any:
 
         monkeypatch.setattr(llm.asyncio, "sleep", record_sleep)
         monkeypatch.setattr(llm.random, "uniform", lambda _start, _end: 0.0)
+        # These tests are about retry backoff; the limiter has its own tests in test_rate_limit.py.
+        models.limiter = llm.RequestLimiter(rpm=0, max_wait=1.0)
+        monkeypatch.setattr(llm, "get_limiter", lambda: models.limiter)
 
         return models
 

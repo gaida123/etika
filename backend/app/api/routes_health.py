@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from google.genai import errors
 from pydantic import BaseModel
 
-from app.core.llm import LLMNotConfiguredError, generate_structured
+from app.core.llm import GeminiBusyError, LLMNotConfiguredError, generate_structured
 from app.core.settings import get_settings
 
 router = APIRouter(tags=["health"])
@@ -45,7 +45,7 @@ async def health_gemini() -> GeminiHealthResponse:
             system="You are a health check. Reply only with the requested JSON.",
             schema=GeminiPing,
         )
-    except LLMNotConfiguredError as exc:
+    except (LLMNotConfiguredError, GeminiBusyError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except errors.APIError as exc:
         raise HTTPException(status_code=502, detail=f"Gemini error {exc.code}: {exc.message}") from exc

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.db import get_session
-from app.core.llm import LLMNotConfiguredError, StructuredGenerator, get_llm
+from app.core.llm import GeminiBusyError, LLMNotConfiguredError, Priority, StructuredGenerator, gemini_priority, get_llm
 from app.intake.intake_service import parse_description
 from app.intake.profile_service import ProfileNotFoundError
 from app.intake.proposals import save_proposal
@@ -24,8 +24,9 @@ async def parse_intake(
     llm: Annotated[StructuredGenerator, Depends(get_llm)],
 ) -> IntakeParseResponse:
     try:
-        facts, dropped = await parse_description(body.text, llm)
-    except LLMNotConfiguredError as exc:
+        with gemini_priority(Priority.INTERACTIVE):
+            facts, dropped = await parse_description(body.text, llm)
+    except (LLMNotConfiguredError, GeminiBusyError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except errors.APIError as exc:
         raise HTTPException(status_code=502, detail=f"Gemini error {exc.code}: {exc.message}") from exc

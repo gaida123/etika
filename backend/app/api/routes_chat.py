@@ -11,10 +11,13 @@ from app.chat.schemas import ChatRequest, ChatResponse
 from app.chat.service import answer_question
 from app.core.db import get_session
 from app.core.llm import (
+    GeminiBusyError,
     ContentGenerator,
     LLMNotConfiguredError,
+    Priority,
     StructuredGenerator,
     describe_error,
+    gemini_priority,
     get_content_generator,
     get_llm,
 )
@@ -36,8 +39,10 @@ async def chat(
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     try:
-        return await answer_question(session, services, generate, generate_structured, profile, body.question)
-    except LLMNotConfiguredError as exc:
+        # Someone is waiting on this answer, so it takes the next free Gemini slot.
+        with gemini_priority(Priority.INTERACTIVE):
+            return await answer_question(session, services, generate, generate_structured, profile, body.question)
+    except (LLMNotConfiguredError, GeminiBusyError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (errors.APIError, ValidationError) as exc:
         raise HTTPException(status_code=502, detail=f"Chat unavailable: {describe_error(exc)}") from exc
