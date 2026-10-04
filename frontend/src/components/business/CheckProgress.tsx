@@ -366,7 +366,7 @@ export function CheckProgress({ run, onDone }: { run: CheckRun; onDone: () => vo
             : "This can take up to a minute. Keep this tab open while your check runs."}
         </span>
         <div className="flex flex-wrap gap-2.5">
-          <Link href="/" className="btn btn-soft">
+          <Link href="/check" className="btn btn-soft">
             Start a new check
           </Link>
           {ready ? (
