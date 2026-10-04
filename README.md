@@ -6,8 +6,8 @@ Compliance navigator for new Vancouver, BC sole proprietors. Spec: [`docs/HANDOF
 
 ```text
 backend/app/contracts/   Shared Pydantic contracts (Dev 1 + Dev 2)
-backend/app/knowledge/   Dev 1: retrieval + registry (stubs only for now)
-backend/app/assessment/  Dev 1: applicability, calculators, scoring (stubs only for now)
+backend/app/knowledge/   Dev 1: TiDB retrieval + registry
+backend/app/assessment/  Dev 1: deterministic applicability, calculators, scoring
 backend/app/intake/      Dev 2: profile versioning, intake
 backend/app/agents/      Dev 2: orchestrator + agents
 backend/app/chat/        Dev 2: chat + citation validation
@@ -45,6 +45,7 @@ uvicorn app.api.main:app --reload
 - `GET /health`: liveness
 - `GET /health/gemini`: one tiny structured Gemini call (needs `GEMINI_API_KEY`)
 - `POST /profile`, `GET /profile/{business_id}[?version=N]`
+- `PATCH /profile/{business_id}`: save owner-confirmed dashboard answers as a new profile version; send raw `facts` values and/or monthly revenue entries
 - `POST /intake/parse`: free text to proposed (unconfirmed) facts; with `business_id` it also stores a proposal
 - `POST /profile/{business_id}/confirm-update`: apply accepted/edited facts from a proposal as a new version
 - `POST /assess/{business_id}[?version=N]`: run the three agents; returns score, now/next/later, findings. If any agent fails, the last full result for the same facts is returned with `cached=true`
@@ -52,16 +53,33 @@ uvicorn app.api.main:app --reload
 - `GET /requirements/{requirement_id}`: registry entry (incl. action link) plus supporting evidence
 - `GET /profile/{business_id}/questions`: follow-up questions for facts that block a decision
 - `POST /chat`: grounded answer from one routed agent; new facts mentioned come back as a proposal to confirm
+- `POST /draft-email`: creates an unsent, deterministic inquiry draft from a saved profile and registry requirement; it never sends email
 
-Live smoke scripts (real Gemini, stub knowledge base), run from `backend/`:
+## Front end
 
 ```powershell
-python scripts/smoke_workflow.py      # health, intake, confirm-update
-python scripts/smoke_assess.py        # full Maya assessment
-python scripts/smoke_assess.py --hire # with a confirmed first hire (demo climax)
-python scripts/warm_demo_cache.py     # cache Maya before/after hire (needs Gemini once)
+cd frontend
+npm ci
+npm run dev
 ```
-- `POST /dev/load-demo`: loads Maya from `contracts/examples/maya_profile.json` (only when `USE_STUBS=true`)
+
+The browser app runs on http://127.0.0.1:3000 and proxies `/api/*` to
+`http://127.0.0.1:8000` by default. For deployment, set `API_URL` to the
+public HTTPS backend URL in the frontend host's environment. Run `npm run build`
+before deploying; `npm run lint` is the quick local type/style gate.
+
+## Smoke checks
+
+Run from `backend/`:
+
+```powershell
+python scripts/smoke_retrieval.py      # live TiDB vector retrieval; read-only
+python scripts/smoke_assess.py         # full Maya API flow with the configured service bundle
+python scripts/smoke_assess.py --hire  # persist a confirmed first hire, then assess
+```
+
+`smoke_workflow.py`, `warm_demo_cache.py`, and `POST /dev/load-demo` are retained
+as stub-only helpers; they are intentionally unavailable when `USE_STUBS=false`.
 
 Tables are created automatically on startup. With the default `DATABASE_URL=sqlite:///./reegal.db`
 nothing else is needed. For TiDB, copy the Console's PyMySQL URI into `backend/.env`; it uses
