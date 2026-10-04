@@ -18,7 +18,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "sqlite:///./reegal.db"
+    database_url: str = "sqlite:///./etika.db"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash"
     gemini_fallback_model: str = "gemini-3.5-flash"  # used after repeated 503s; empty disables

@@ -81,7 +81,7 @@ python scripts/smoke_assess.py --hire  # persist a confirmed first hire, then as
 `smoke_workflow.py`, `warm_demo_cache.py`, and `POST /dev/load-demo` are retained
 as stub-only helpers; they are intentionally unavailable when `USE_STUBS=false`.
 
-Tables are created automatically on startup. With the default `DATABASE_URL=sqlite:///./reegal.db`
+Tables are created automatically on startup. With the default `DATABASE_URL=sqlite:///./etika.db`
 nothing else is needed. For TiDB, copy the Console's PyMySQL URI into `backend/.env`; it uses
 `mysql+pymysql://<instance-prefix>.root:<url-encoded-password>@<host>:4000/<database>` and may include
 `ssl_ca`, `ssl_verify_cert=true`, and `ssl_verify_identity=true`. TLS is verified automatically.

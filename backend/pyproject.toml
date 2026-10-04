@@ -1,5 +1,5 @@
 [project]
-name = "reegal-backend"
+name = "etika-backend"
 version = "0.1.0"
 description = "Compliance navigator backend for new Vancouver, BC sole proprietors"
 requires-python = ">=3.11"

@@ -1,4 +1,4 @@
-# Reegal Agent Upgrade Plan
+# Etika Agent Upgrade Plan
 
 Oct 4, 2026 · @Freya
 
