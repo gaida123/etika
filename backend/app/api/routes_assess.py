@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.agents.cache import with_cache
 from app.agents.orchestrator import Orchestrator, get_trace
 from app.agents.schemas import AssessmentResponse
 from app.contracts.facts import DEFAULT_SEGMENT_ID
@@ -22,6 +23,7 @@ from app.core.llm import (
     get_llm,
 )
 from app.core.services import Services, get_services
+from app.core.settings import get_settings
 from app.intake import profile_service
 
 router = APIRouter(tags=["assessment"])
@@ -48,9 +50,10 @@ async def assess(
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     try:
-        return await Orchestrator(services, generate, generate_structured).assess(session, profile)
+        live = await Orchestrator(services, generate, generate_structured).assess(session, profile)
     except LLMNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return with_cache(session, profile, live, use_stubs=get_settings().use_stubs)
 
 
 @router.get("/assessments/{assessment_id}/trace")
