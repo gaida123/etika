@@ -43,6 +43,9 @@ type Ctx = {
   error: string | null;
   /** True while a re-check runs on top of results that are still shown. */
   rechecking: boolean;
+  /** Id of the first live check, shown as the progress screen until the owner moves on; null when closed. */
+  checkRun: number | null;
+  closeCheck: () => void;
   marks: Marks;
   setMark: (requirementId: string, progress: Progress) => void;
   retry: () => void;
@@ -99,6 +102,7 @@ export function BusinessProvider({ businessId, children }: { businessId: string;
   const [phase, setPhase] = useState<Ctx["phase"]>("loading");
   const [error, setError] = useState<string | null>(null);
   const [rechecking, setRechecking] = useState(false);
+  const [checkRun, setCheckRun] = useState<number | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [attempt, setAttempt] = useState(0);
   const [marks, setMarks] = useStored<Marks>(`etika:marks:${businessId}`, {});
@@ -139,12 +143,14 @@ export function BusinessProvider({ businessId, children }: { businessId: string;
           }
         } else {
           setPhase("assessing");
+          setCheckRun(attempt);
           await assess(p);
         }
         if (!cancelled) setPhase("ready");
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof ApiError && e.status === 404 ? "We couldn't find this business." : message(e));
+        setCheckRun(null);
         setPhase("error");
       }
     })();
@@ -222,6 +228,8 @@ export function BusinessProvider({ businessId, children }: { businessId: string;
     phase,
     error,
     rechecking,
+    checkRun,
+    closeCheck: () => setCheckRun(null),
     marks,
     setMark: (id, progress) => setMarks({ ...marks, [id]: progress }),
     retry: () => {

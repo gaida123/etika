@@ -196,7 +196,8 @@ let chatCount = 0;
 
 export const demoBackend = {
   getProfile: () => wait(profile, 150),
-  runAssessment: () => wait(assessment(), 1200),
+  // Long enough to preview the agents working on the check screen.
+  runAssessment: () => wait(assessment(), 6000),
   getQuestions: () => wait(questions, 50),
   getRequirement: (id: string) => {
     const s = SPECS.find((x) => x.id === id);

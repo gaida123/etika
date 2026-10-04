@@ -1,33 +1,57 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { CheckIcon, Logo, LogoMark } from "@/components/ui";
+import { Logo, LogoMark } from "@/components/ui";
 import { AREAS, confirmedFactCount, kindOf } from "@/lib/assessment";
 import { useBusiness } from "./BusinessProvider";
+import { type CheckRun, CheckProgress, LaneStatus, useCheckRun } from "./CheckProgress";
+import { AreaIcon } from "./icons";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { phase, assessment, isDemo } = useBusiness();
+  const { businessId, phase, assessment, isDemo, closeCheck } = useBusiness();
+  const run = useCheckRun();
+  const router = useRouter();
+  const path = usePathname();
+  // Once the check is ready, any navigation leaves the check screen for the page asked for.
+  const leaveCheck = run?.ready ? closeCheck : undefined;
+
   return (
     <div className="shell">
-      <AppSidebar />
+      <AppSidebar run={run} onNavigate={leaveCheck} />
       <div className="content">
         {isDemo && (
           <div className="border-b border-line bg-brand-tint px-5 py-2.5 text-sm text-brand" role="note">
             Sample data for previewing the design. Nothing here comes from the backend or official sources.
           </div>
         )}
-        {assessment ? children : phase === "error" ? <ErrorState /> : <LoadingState />}
+        {run ? (
+          <CheckProgress
+            run={run}
+            onDone={() => {
+              closeCheck();
+              window.scrollTo({ top: 0 });
+              if (path !== `/b/${businessId}`) router.push(`/b/${businessId}`);
+            }}
+          />
+        ) : assessment ? (
+          children
+        ) : phase === "error" ? (
+          <ErrorState />
+        ) : (
+          <LoadingState />
+        )}
       </div>
     </div>
   );
 }
 
-function AppSidebar() {
+function AppSidebar({ run, onNavigate }: { run: CheckRun | null; onNavigate?: () => void }) {
   const { businessId, profile, rows, marks, questions } = useBusiness();
   const path = usePathname();
   const base = `/b/${businessId}`;
+  const showCount = !run || run.ready;
   const name = profile?.trading_name || profile?.legal_name || "Your business";
 
   return (
@@ -36,18 +60,43 @@ function AppSidebar() {
 
       <nav aria-label="Your check">
         <div className="navh">Your check</div>
-        <NavLink href={base} current={path === base} icon={<GridIcon />}>
+        <NavLink href={base} current={run ? true : path === base} icon={<GridIcon />} onClick={onNavigate}>
           Overview
         </NavLink>
-        <NavLink href={`${base}#input`} icon={<QuestionIcon />} count={questions.length || undefined}>
+        <NavLink
+          href={`${base}#input`}
+          icon={<QuestionIcon />}
+          count={(showCount && questions.length) || undefined}
+          onClick={onNavigate}
+        >
           Needs your input
         </NavLink>
-        <NavLink href={`${base}/ask`} current={path === `${base}/ask`} icon={<LogoMark size={18} />}>
+        <NavLink
+          href={`${base}/ask`}
+          current={!run && path === `${base}/ask`}
+          icon={<LogoMark size={18} />}
+          onClick={onNavigate}
+        >
           Ask etika
         </NavLink>
       </nav>
 
-      {rows.length > 0 && (
+      {run ? (
+        <nav aria-label="Categories">
+          <div className="navh">Categories</div>
+          {run.lanes.map((l) => (
+            <NavLink
+              key={l.area}
+              href={`${base}#area-${l.area}`}
+              icon={<AreaIcon area={l.area} />}
+              status={<LaneStatus lane={l} />}
+              onClick={onNavigate}
+            >
+              {l.label}
+            </NavLink>
+          ))}
+        </nav>
+      ) : rows.length > 0 && (
         <nav aria-label="Categories">
           <div className="navh">Categories</div>
           {AREAS.map((a) => {
@@ -58,7 +107,7 @@ function AppSidebar() {
               <NavLink
                 key={a.id}
                 href={`${base}#area-${a.id}`}
-                icon={AREA_ICONS[a.id]}
+                icon={<AreaIcon area={a.id} />}
                 count={applicable.length ? `${done}/${applicable.length}` : undefined}
               >
                 {a.label}
@@ -70,7 +119,7 @@ function AppSidebar() {
 
       <nav aria-label="Business">
         <div className="navh">Business</div>
-        <NavLink href={`${base}#coverage`} icon={<CoverageIcon />}>
+        <NavLink href={`${base}#coverage`} icon={<CoverageIcon />} onClick={onNavigate}>
           What we cover
         </NavLink>
         <NavLink href="/" icon={<PlusIcon />}>
@@ -105,65 +154,39 @@ function NavLink({
   current,
   icon,
   count,
+  status,
+  onClick,
   children,
 }: {
   href: string;
   current?: boolean;
   icon: ReactNode;
   count?: string | number;
+  status?: ReactNode;
+  onClick?: () => void;
   children: ReactNode;
 }) {
   return (
-    <Link href={href} className={`nav ${current ? "nav-on" : ""}`} aria-current={current ? "page" : undefined}>
+    <Link
+      href={href}
+      className={`nav ${current ? "nav-on" : ""}`}
+      aria-current={current ? "page" : undefined}
+      onClick={onClick}
+    >
       <span className="flex-none">{icon}</span>
       {children}
-      {count !== undefined && <span className="count">{count}</span>}
+      {status ?? (count !== undefined && <span className="count">{count}</span>)}
     </Link>
   );
 }
 
 function LoadingState() {
-  const { profile, phase } = useBusiness();
-  const name = profile?.trading_name || "your business";
   return (
     <div className="inner">
-      <section className="box flex max-w-[520px] flex-col gap-3.5 p-6" aria-busy="true" aria-labelledby="l-h">
-        <div className="tag">Loading</div>
-        <h1 id="l-h" className="m-0 text-xl leading-tight font-medium tracking-[-0.015em]">
-          Checking {name}…
-        </h1>
-        <Step state={profile ? "done" : "active"}>
-          {profile ? `Reading your ${confirmedFactCount(profile)} confirmed facts` : "Reading your business profile"}
-        </Step>
-        <Step state={phase === "assessing" ? "active" : "todo"}>Matching against requirements</Step>
-        <Step state={phase === "assessing" ? "active" : "todo"}>Pulling official sources</Step>
-        <div className="mt-2 flex flex-col gap-2">
-          <div className="sk w-[90%]" />
-          <div className="sk w-[70%]" />
-          <div className="sk w-[80%]" />
-        </div>
-        <span className="muted text-[13px]">Usually under 20 seconds.</span>
-      </section>
-    </div>
-  );
-}
-
-function Step({ state, children }: { state: "done" | "active" | "todo"; children: ReactNode }) {
-  if (state === "done")
-    return (
-      <div className="flex items-center gap-2.5 text-sm text-brand">
-        <CheckIcon size={18} />
-        {children}
+      <div className="muted flex items-center gap-2.5 text-sm" role="status" aria-busy="true">
+        <span className="ck-spin" aria-hidden="true" />
+        Loading your business…
       </div>
-    );
-  return (
-    <div className={`flex items-center gap-2.5 text-sm ${state === "active" ? "font-medium" : "muted"}`}>
-      {state === "active" ? (
-        <span className="spin" />
-      ) : (
-        <span className="mx-0.5 inline-block size-3.5 rounded-full border-2 border-opt" />
-      )}
-      {children}
     </div>
   );
 }
@@ -206,13 +229,3 @@ const QuestionIcon = () =>
   );
 const CoverageIcon = () => icon(<circle cx="12" cy="12" r="9" />, { strokeDasharray: "3 3" });
 const PlusIcon = () => icon(<path d="M12 5v14M5 12h14" />);
-const AREA_ICONS = {
-  registration: icon(<path d="M6 3h9l4 4v14H6zM14 3v5h5" />),
-  tax: icon(<path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2zM9 8h6M9 12h6M9 16h3" />),
-  employer: icon(
-    <>
-      <circle cx="9" cy="8" r="3" />
-      <path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 0 1 0 6M18 15c2 .6 3 2.3 3 5" />
-    </>,
-  ),
-};

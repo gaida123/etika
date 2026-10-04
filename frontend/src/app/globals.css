@@ -506,6 +506,308 @@
     }
   }
 
+  /* Check in progress (wireframe "Checking"). */
+  .ck-spin {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--color-brand);
+    border-right-color: transparent;
+    animation: spin 0.9s linear infinite;
+    flex: none;
+  }
+  .ck-spin-sm {
+    width: 10px;
+    height: 10px;
+    border-width: 1.5px;
+  }
+  .ck-bar {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-line-soft);
+    overflow: hidden;
+  }
+  .ck-bar > div {
+    height: 100%;
+    background: var(--color-brand);
+    transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: width;
+  }
+  .ck-lane-bar {
+    max-height: 4px;
+    transition:
+      opacity 0.35s ease,
+      max-height 0.35s ease,
+      margin 0.35s ease;
+  }
+  .ck-lane-bar.ck-hide {
+    opacity: 0;
+    max-height: 0;
+    margin-top: 0;
+  }
+  .ck-flow {
+    display: grid;
+    grid-template-columns: 150px 28px 128px 28px minmax(0, 1fr) 28px 150px;
+    align-items: center;
+    row-gap: 10px;
+  }
+  .ck-lbl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-muted);
+  }
+  .ck-lbl b {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--color-opt);
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 11px;
+    color: var(--color-ink-soft);
+  }
+  .ck-node {
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+    background: #fff;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition:
+      border-color 0.3s,
+      box-shadow 0.3s;
+  }
+  .ck-node.work {
+    border-color: var(--color-brand);
+    box-shadow: inset 0 0 0 1px var(--color-brand);
+  }
+  .ck-node.done {
+    border-color: #b9c8ae;
+  }
+  .ck-node.wait {
+    border-style: dashed;
+    border-color: var(--color-opt);
+  }
+  .ck-conn {
+    position: relative;
+    height: 2px;
+    align-self: center;
+    background: var(--color-line);
+    overflow: hidden;
+    transition: background 0.4s;
+  }
+  .ck-conn.done {
+    background: var(--color-brand);
+  }
+  .ck-conn.on {
+    background: #b9c8ae;
+  }
+  .ck-conn.on::after {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 0;
+    width: 10px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-brand);
+    animation: ck-flow 1.1s linear infinite;
+  }
+  @keyframes ck-flow {
+    from {
+      transform: translateX(-10px);
+    }
+    to {
+      transform: translateX(28px);
+    }
+  }
+  .ck-lanes {
+    position: relative;
+    display: grid;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .ck-rail {
+    position: absolute;
+    top: 16%;
+    bottom: 16%;
+    width: 2px;
+    transition: background 0.4s;
+  }
+  .ck-lane {
+    position: relative;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: 4px 12px;
+    align-items: start;
+    padding: 12px 14px;
+    margin: 0 10px;
+  }
+  .ck-lane::before,
+  .ck-lane::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 10px;
+    height: 2px;
+    margin-top: -1px;
+    transition: background 0.4s;
+  }
+  .ck-lane::before {
+    left: -11px;
+    background: var(--fan);
+  }
+  .ck-lane::after {
+    right: -11px;
+    background: var(--merge);
+  }
+  .ck-ic {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--color-opt);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    transition:
+      background 0.35s,
+      border-color 0.35s,
+      color 0.35s;
+  }
+  .ck-lane.work .ck-ic {
+    border-color: var(--color-brand);
+    color: var(--color-brand);
+  }
+  .ck-lane.done .ck-ic {
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+    color: #fff;
+  }
+  .ck-st {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--color-ink-soft);
+    white-space: nowrap;
+    cursor: default;
+    user-select: none;
+  }
+  .ck-st-done {
+    color: var(--color-brand);
+    font-weight: 500;
+  }
+  .ck-st-wait {
+    color: #9a988f;
+  }
+  .ck-find {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--color-line-soft);
+    animation: ck-rowin 0.4s ease both;
+  }
+  .ck-find-fade {
+    animation: ck-fade 0.4s ease both;
+  }
+  @keyframes ck-rowin {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .ck-swap {
+    animation: ck-fade 0.35s ease both;
+  }
+  @keyframes ck-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .ck-pop {
+    animation: ck-pop 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes ck-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .ck-sk {
+    height: 10px;
+    border-radius: 5px;
+    background: var(--color-line-soft);
+  }
+  .ck-cta {
+    transition:
+      background 0.3s,
+      border-color 0.3s,
+      color 0.3s;
+  }
+  .ck-off,
+  .ck-off:hover {
+    background: var(--color-line-soft);
+    border-color: var(--color-line-soft);
+    color: var(--color-muted);
+    cursor: not-allowed;
+  }
+  @media (max-width: 1100px) {
+    .ck-flow {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .ck-flow > * {
+      order: var(--o, 99);
+    }
+    .ck-flow > .ck-gap,
+    .ck-conn,
+    .ck-rail,
+    .ck-lane::before,
+    .ck-lane::after {
+      display: none;
+    }
+    .ck-lbl {
+      padding-left: 0;
+      margin-top: 6px;
+    }
+    .ck-lane {
+      margin: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ck-spin,
+    .ck-conn.on::after,
+    .ck-find,
+    .ck-find-fade,
+    .ck-swap,
+    .ck-pop {
+      animation: none;
+    }
+    .ck-bar > div {
+      transition: none;
+    }
+  }
+
   @media (max-width: 720px) {
     .inner {
       padding: 32px 16px 56px;

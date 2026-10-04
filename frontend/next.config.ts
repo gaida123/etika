@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   outputFileTracingRoot: __dirname,
+  experimental: {
+    // Live assessments queue each agent's Gemini report (up to 60s per call), so they can run
+    // well past the proxy's 30s default. Without this the browser sees a failed check.
+    proxyTimeout: 180_000,
+  },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API_URL}/:path*` }];
   },
