@@ -145,6 +145,28 @@ class AssessmentCacheRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class FindingCacheRow(Base):
+    """One drafted finding, reusable by any profile whose relevant facts are identical (Phase 3).
+
+    ``cache_key`` covers the facts the requirement depends on, its applicability, the corpus
+    revision, the prompt version and the model, so an entry can only be reused where all of those
+    still match. Never holds a status: code decides that on every run.
+    """
+
+    __tablename__ = "finding_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent: Mapped[str] = mapped_column(String(32))
+    requirement_id: Mapped[str] = mapped_column(String(16), index=True)
+    draft_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    cited_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    cited_chunks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    kb_version: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class ConversationRow(Base):
     """One chat turn with its grounding and any proposed fact update."""
 

@@ -56,6 +56,7 @@ class AgentRunOutput(BaseModel):
     calculator_results: dict[str, CalculatorResult] = Field(default_factory=dict)
     trace: list[AgentTraceEntry] = Field(default_factory=list)
     tool_calls: int = 0
+    cached_findings: int = 0
     error: str | None = None
 
 
@@ -66,6 +67,9 @@ class AgentRunSummary(BaseModel):
     mode: str | None
     tool_calls: int
     findings: int
+    cached_findings: int = Field(
+        default=0, description="Findings reused from the cache, so written with no Gemini request."
+    )
     error: str | None = None
 
 

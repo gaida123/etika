@@ -2,7 +2,7 @@
 
 1. Code evaluates applicability.
 2. Pick agents: registration and tax always; employer full / pre-hire / skipped.
-3. Prefetch active agents in parallel, then serialize their Gemini report calls.
+3. Reuse cached findings, prefetch the rest in parallel, then serialize their Gemini report calls.
 4. Validate citations, set status from applicability (code), merge flags.
 5. Score (Developer 1), enrich cards with sources and threshold progress, persist findings + trace.
 """
@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 
 from app.agents.base import BaseAgent
 from app.agents.employer import EmployerAgent
+from app.agents.finding_cache import FindingCache
 from app.agents.registration import RegistrationAgent
+from app.agents.retrieval_adapter import kb_version
 from app.agents.schemas import AgentRunOutput, AgentRunSummary, AssessmentResponse
 from app.agents.tax import TaxAgent
 from app.chat.citations import NO_SOURCE_FLAG, validate_citations
@@ -92,6 +94,7 @@ class Orchestrator:
         assessment_id = str(uuid.uuid4())
         applicability = self.services.applicability.evaluate(profile)
         planned = self.plan(profile, applicability)
+        cache = self._finding_cache(session)
         # Keep retrieval/prefetch concurrent, but avoid a burst of three large structured
         # reports against one provider capacity pool. This gate also covers escalation
         # re-reports in the same assessment.
@@ -114,6 +117,7 @@ class Orchestrator:
                 "profile_version": profile.profile_version,
                 "agent_start_stagger_seconds": stagger_seconds,
                 "report_concurrency": 1,
+                "finding_cache": cache.enabled,
             },
             tool_output_summary="running "
             + ", ".join(f"{a.name}" + (f" ({m})" if m else "") for a, _, m in planned),
@@ -124,7 +128,9 @@ class Orchestrator:
         ) -> AgentRunOutput:
             if index and stagger_seconds > 0:
                 await asyncio.sleep(stagger_seconds * index)
-            return await agent.run(assessment_id, profile, scope, mode, report_generator=queued_report)
+            return await agent.run(
+                assessment_id, profile, scope, mode, report_generator=queued_report, cache=cache
+            )
 
         outputs: list[AgentRunOutput] = await asyncio.gather(
             *(run_staggered(index, agent, scope, mode) for index, (agent, scope, mode) in enumerate(planned))
@@ -159,10 +165,39 @@ class Orchestrator:
             findings=findings,
             agents=[
                 AgentRunSummary(
-                    agent=o.agent, mode=o.mode, tool_calls=o.tool_calls, findings=len(o.scope), error=o.error
+                    agent=o.agent,
+                    mode=o.mode,
+                    tool_calls=o.tool_calls,
+                    findings=len(o.scope),
+                    cached_findings=o.cached_findings,
+                    error=o.error,
                 )
                 for o in outputs
             ],
+        )
+
+    def _finding_cache(self, session: Session) -> FindingCache:
+        """The per-requirement draft cache for one assessment.
+
+        The corpus version decides whether reuse is safe at all, so a retrieval service that
+        cannot identify itself disables the cache instead of failing the assessment.
+        """
+        settings = get_settings()
+        try:
+            corpus_version: str | None = kb_version(self.services.retrieval)
+        except Exception:  # noqa: BLE001 - cache availability must never break an assessment
+            corpus_version = None
+        return FindingCache(
+            session=session,
+            kb_version=corpus_version,
+            model=settings.gemini_model,
+            gates={
+                "use_stubs": settings.use_stubs,
+                "allow_unreviewed_knowledge": settings.allow_unreviewed_knowledge,
+                "allow_candidate_requirement_mappings": settings.allow_candidate_requirement_mappings,
+                "allow_draft_registry": settings.allow_draft_registry,
+            },
+            enabled=settings.finding_cache_enabled and settings.agent_mode != "legacy",
         )
 
     def _finalize(self, output: AgentRunOutput, assessment_id: str) -> list[Finding]:

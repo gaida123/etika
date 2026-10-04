@@ -13,7 +13,7 @@ from google.genai import types
 
 from app.agents.schemas import AgentName, AgentRunOutput
 from app.contracts.facts import BusinessProfile
-from app.contracts.retrieval import RetrievalRequest, RetrievalResult
+from app.contracts.retrieval import RetrievalRequest, RetrievalResult, RetrievedChunk
 from app.contracts.trace import AgentTraceEntry
 from app.core.services import Services
 
@@ -197,17 +197,26 @@ class AgentToolbox:
             limit=EVIDENCE_LIMIT,
         )
 
-    def _register(self, requirement_id: str, result: RetrievalResult) -> dict[str, Any]:
-        """Make every returned chunk citable in this run, then summarize it for the model.
+    def register_chunks(self, requirement_id: str, chunks: Sequence[RetrievedChunk]) -> None:
+        """Make chunks citable in this run without retrieving them (Phase 3.5).
+
+        The strict citation filter accepts only chunks "retrieved in this run", so a finding reused
+        from the cache has to put the evidence it cited back on the run before validation sees it.
 
         Dedupe is per requirement on purpose: one chunk can legitimately support more than one
         requirement, so the same chunk ID may appear under several requirements in the same run.
         """
+        if requirement_id not in self.scope_ids:
+            return
         ids = self.output.evidence_by_requirement.setdefault(requirement_id, [])
-        for chunk in result.chunks:
+        for chunk in chunks:
             self.output.retrieved[chunk.chunk_id] = chunk
             if chunk.chunk_id not in ids:
                 ids.append(chunk.chunk_id)
+
+    def _register(self, requirement_id: str, result: RetrievalResult) -> dict[str, Any]:
+        """Make every returned chunk citable in this run, then summarize it for the model."""
+        self.register_chunks(requirement_id, result.chunks)
         return {
             "status": result.status,
             "chunks": [

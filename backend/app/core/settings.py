@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     use_stubs: bool = True
     agent_mode: Literal["prefetch", "legacy"] = "prefetch"  # prefetch: one Gemini call per agent
     escalation_enabled: bool = True  # one extra investigate+report round for weak findings
+    # Reuse a previously drafted finding when the facts it depends on, the corpus revision, the
+    # prompt version and the model are all unchanged. Off means every run pays for every finding.
+    finding_cache_enabled: bool = True
     # Offset specialist launches slightly in live runs. This preserves the three independent
     # agents while avoiding a simultaneous burst against a shared model capacity pool.
     agent_start_stagger_seconds: float = 3.0

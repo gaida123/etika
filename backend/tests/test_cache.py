@@ -1,11 +1,13 @@
 """Assessment fingerprint cache (D2-12). Gemini is faked; no live calls."""
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.agents.cache import profile_fingerprint, with_cache
 from app.agents.schemas import AgentRunSummary, AssessmentResponse
 from app.contracts.facts import BusinessProfile, FactValue
+from app.core.settings import get_settings
 from tests.fake_gemini import FakeGemini
 from tests.test_agents import assess_maya, use_fake
 
@@ -112,7 +114,12 @@ def test_successful_rerun_overwrites_the_cached_response(session: Session, maya:
     assert served.assessment_id == "new"
 
 
-def test_assess_route_falls_back_to_cache_on_agent_failure(client: TestClient) -> None:
+def test_assess_route_falls_back_to_cache_on_agent_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This fallback only has a job when an agent actually reaches Gemini, so the Phase 3 finding
+    # cache is off here; the test below covers what happens when it is on.
+    monkeypatch.setattr(get_settings(), "finding_cache_enabled", False)
     use_fake(FakeGemini())
     first = assess_maya(client)
     assert first["cached"] is False
@@ -127,3 +134,17 @@ def test_assess_route_falls_back_to_cache_on_agent_failure(client: TestClient) -
     assert second["assessment_id"] == first["assessment_id"]
     assert second["score"] == first["score"]
     assert all(agent["error"] is None for agent in second["agents"])
+
+
+def test_finding_cache_absorbs_an_outage_before_the_fallback_is_needed(client: TestClient) -> None:
+    """With Phase 3 on, a report outage for unchanged facts never becomes a degraded response."""
+    use_fake(FakeGemini())
+    assess_maya(client)
+
+    use_fake(FakeGemini(fail_report_for="tax"))
+    second_id = client.post("/dev/load-demo").json()["business_id"]
+    second = client.post(f"/assess/{second_id}").json()
+
+    assert second["cached"] is False  # this is a live run that simply made no request
+    assert all(agent["error"] is None for agent in second["agents"])
+    assert {a["agent"]: a["cached_findings"] for a in second["agents"]}["tax"] == 4

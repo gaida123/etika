@@ -1,8 +1,10 @@
-"""Base agent: scope, specialist prompt, tools, prefetch, single report call, trace.
+"""Base agent: scope, specialist prompt, tools, cache, prefetch, single report call, trace.
 
 Prefetch mode (``AGENT_MODE=prefetch``, Phase 2): code gathers every piece of evidence the agent
 needs through the toolbox (zero Gemini calls), then the agent makes exactly ONE structured call to
 write its findings. The tool loop survives only as a bounded escalation path for weak findings.
+Phase 3 puts the per-requirement finding cache in front of that: requirements whose facts are
+unchanged are answered from TiDB, and only the rest reach the single call (none means none).
 
 Legacy mode (``AGENT_MODE=legacy``): the original two-phase run, a Gemini tool loop followed by a
 report call. Unchanged, and still used by chat (which calls ``investigate`` directly).
@@ -14,6 +16,7 @@ from typing import Any, ClassVar
 
 from google.genai import types
 
+from app.agents.finding_cache import CACHE, FindingCache
 from app.agents.models import EvidencePack, RequirementEvidence
 from app.agents.retrieval_adapter import (
     CHUNKS_PER_REQUIREMENT,
@@ -22,7 +25,7 @@ from app.agents.retrieval_adapter import (
     fact_keys,
     to_chunk,
 )
-from app.agents.schemas import AgentName, AgentReport, AgentRunOutput
+from app.agents.schemas import AgentName, AgentReport, AgentRunOutput, FindingDraft
 from app.agents.tools import CALCULATOR_NAMES, AgentToolbox
 from app.contracts.assessment import ApplicabilityResult
 from app.contracts.facts import BusinessProfile
@@ -108,8 +111,13 @@ class BaseAgent:
         scope: list[ApplicabilityResult],
         mode: str | None = None,
         report_generator: StructuredGenerator | None = None,
+        cache: FindingCache | None = None,
     ) -> AgentRunOutput:
-        """Prefetch then report in one call. Errors are captured on the output, never raised."""
+        """Reuse cached findings, then prefetch and report the rest in one call.
+
+        Errors are captured on the output, never raised. When every requirement is cached the
+        agent makes no Gemini request at all.
+        """
         write_report = report_generator or self.generate_structured
         if get_settings().agent_mode == "legacy":
             return await self._run_legacy(assessment_id, profile, scope, mode, write_report)
@@ -117,16 +125,23 @@ class BaseAgent:
         output = AgentRunOutput(agent=self.name, mode=mode, scope=scope)
         toolbox = AgentToolbox(self.name, assessment_id, profile, self.services, output, self.tool_names)
         try:
-            pack = await self.prefetch(toolbox, profile, scope, mode)
-            report = await write_report(
-                prompt=self._report_prompt_from_pack(pack),
-                system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
-                schema=AgentReport,
-            )
-            output.drafts = report.findings
-            toolbox.log("report", {}, f"{len(report.findings)} draft finding(s)")
-            if get_settings().escalation_enabled:
-                await self._escalate_weak_findings(toolbox, pack, output, mode, write_report)
+            reused = self._reuse_cached(toolbox, cache, profile, scope, mode)
+            misses = [a for a in scope if a.requirement_id not in reused]
+            if misses:
+                pack = await self.prefetch(toolbox, profile, misses, mode)
+                report = await write_report(
+                    prompt=self._report_prompt_from_pack(pack),
+                    system=f"{self.system_prompt(mode)}\n\n{REPORT_RULES}",
+                    schema=AgentReport,
+                )
+                output.drafts = report.findings
+                toolbox.log("report", {}, f"{len(report.findings)} draft finding(s)")
+                if get_settings().escalation_enabled:
+                    await self._escalate_weak_findings(toolbox, pack, output, mode, write_report)
+                self._fill_cache(cache, profile, misses, mode, output)
+            else:
+                toolbox.log("report", {}, "no Gemini request: every requirement was cached", source=CACHE)
+            output.drafts = [*output.drafts, *reused.values()]
         except Exception as exc:  # noqa: BLE001  (any failure becomes a visible, non-fatal error)
             output.error = describe_error(exc)
             toolbox.log("error", {}, output.error)
@@ -213,6 +228,63 @@ class BaseAgent:
                 if "error" not in result:
                     pack.calculators[name] = result
         return pack
+
+    # --- finding cache ------------------------------------------------------------------------
+
+    def _reuse_cached(
+        self,
+        toolbox: AgentToolbox,
+        cache: FindingCache | None,
+        profile: BusinessProfile,
+        scope: list[ApplicabilityResult],
+        mode: str | None,
+    ) -> dict[str, FindingDraft]:
+        """Drafts this run can reuse, with their evidence put back on the run (Phase 3.4/3.5)."""
+        if cache is None or not cache.enabled:
+            return {}
+        reused: dict[str, FindingDraft] = {}
+        for applicability in scope:
+            req = self.services.registry.get(applicability.requirement_id)
+            if req is None:
+                continue
+            hit = cache.lookup(self.name, req, applicability, profile, mode)
+            if hit is None:
+                continue
+            toolbox.register_chunks(req.id, hit.chunks)
+            reused[req.id] = hit.draft
+        toolbox.output.cached_findings = len(reused)
+        if reused:
+            toolbox.log(
+                "finding_cache",
+                {"requirement_ids": sorted(reused)},
+                f"reused {len(reused)} finding(s) with no Gemini request",
+                source=CACHE,
+            )
+        return reused
+
+    def _fill_cache(
+        self,
+        cache: FindingCache | None,
+        profile: BusinessProfile,
+        misses: list[ApplicabilityResult],
+        mode: str | None,
+        output: AgentRunOutput,
+    ) -> None:
+        """Store the drafts this run wrote, after any escalation has improved them."""
+        if cache is None or not cache.enabled:
+            return
+        drafts = {d.requirement_id: d for d in output.drafts}
+        for applicability in misses:
+            req = self.services.registry.get(applicability.requirement_id)
+            draft = drafts.get(applicability.requirement_id)
+            if req is None or draft is None:
+                continue
+            chunks = [
+                output.retrieved[cid]
+                for cid in output.evidence_by_requirement.get(req.id, [])
+                if cid in output.retrieved
+            ]
+            cache.store(self.name, req, applicability, profile, mode, draft, chunks)
 
     # --- escalation ---------------------------------------------------------------------------
 
