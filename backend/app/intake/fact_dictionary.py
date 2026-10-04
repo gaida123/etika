@@ -56,8 +56,11 @@ FACT_SPECS: dict[str, FactSpec] = {
         "bool", "Business has a dedicated store, office or other established business premises."
     ),
     "sells_at_recurring_markets": FactSpec("bool", "Business sells regularly at markets, fairs or pop-ups."),
-    "has_employees": FactSpec("bool", "Business currently has one or more employees."),
-    "plans_to_hire": FactSpec("bool", "Owner plans to hire someone."),
+    "has_employees": FactSpec(
+        "bool",
+        "Owner has hired or taken on someone to work for the business, including someone who starts soon.",
+    ),
+    "plans_to_hire": FactSpec("bool", "Owner intends to hire someone but has not hired them yet."),
     "planned_hire_date": FactSpec("month", "Month the owner plans to hire, as YYYY-MM."),
 }
 
