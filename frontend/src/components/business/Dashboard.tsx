@@ -5,6 +5,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { LogoMark } from "@/components/ui";
+import type { Area } from "@/lib/api";
 import {
   AREAS,
   type Kind,
@@ -23,6 +24,8 @@ import {
 import { useBusiness } from "./BusinessProvider";
 import { AgentTrace } from "./AgentTrace";
 import { FactQuestion } from "./FactQuestion";
+import { PersonaAvatar } from "./icons";
+import { PersonaCards } from "./PersonaCards";
 
 type Filter = "all" | "action" | "input" | "done";
 
@@ -179,6 +182,8 @@ export function Dashboard() {
         )}
       </section>
 
+      <PersonaCards />
+
       <section id="all" aria-labelledby="all-h" className="flex scroll-mt-6 flex-col gap-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="all-h" className="sec">
@@ -203,6 +208,7 @@ export function Dashboard() {
           <AreaGroup
             key={area.id}
             id={`area-${area.id}`}
+            area={area.id}
             label={area.label}
             rows={rows.filter((r) => r.area === area.id)}
             filter={filter}
@@ -245,8 +251,21 @@ const MATCHES: Record<Filter, (k: Kind) => boolean> = {
   done: (k) => k === "done",
 };
 
-function AreaGroup({ id, label, rows, filter }: { id: string; label: string; rows: Row[]; filter: Filter }) {
-  const { businessId, marks } = useBusiness();
+function AreaGroup({
+  id,
+  area,
+  label,
+  rows,
+  filter,
+}: {
+  id: string;
+  area: Area;
+  label: string;
+  rows: Row[];
+  filter: Filter;
+}) {
+  const { businessId, marks, assessment } = useBusiness();
+  const persona = assessment?.agents.find((a) => a.agent === area)?.persona ?? null;
   const kinds = new Map(rows.map((r) => [r.requirement_id, kindOf(r, marks)]));
   const shown = rows.filter((r) => MATCHES[filter](kinds.get(r.requirement_id)!));
   if (!shown.length) return null;
@@ -267,8 +286,16 @@ function AreaGroup({ id, label, rows, filter }: { id: string; label: string; row
 
   return (
     <div id={id} className="box scroll-mt-6 overflow-hidden">
-      <div className="flex flex-wrap justify-between gap-2 bg-panel px-5 py-3.5">
-        <h3 className="m-0 text-base font-medium">{label}</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-panel px-5 py-3.5">
+        <h3 className="m-0 flex items-center gap-2 text-base font-medium">
+          {label}
+          {persona && (
+            <span className="muted inline-flex items-center gap-1 text-[13px] font-normal">
+              <PersonaAvatar avatar={persona.avatar} size={20} />
+              {persona.display_name}
+            </span>
+          )}
+        </h3>
         <span className="muted text-sm">{summary}</span>
       </div>
       {open.length > 0 && (

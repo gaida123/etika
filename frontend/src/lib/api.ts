@@ -47,6 +47,29 @@ export type Finding = {
   confidence: number;
 };
 
+/** The character behind one agent. Display only: it never affects status, score or sources. */
+export type Persona = {
+  id: string;
+  display_name: string;
+  role_title: string;
+  specialty: string;
+  avatar: string;
+};
+
+export type AgentRun = {
+  agent: Area;
+  mode: string | null;
+  tool_calls: number;
+  findings: number;
+  cached_findings: number;
+  persona: Persona | null;
+  /** The persona's voiced line. Empty when the agent failed. */
+  summary: string;
+  /** "model" when Gemini wrote it, "template" when code did (e.g. a fully cached run). */
+  summary_source: "model" | "template";
+  error: string | null;
+};
+
 export type Assessment = {
   assessment_id: string;
   business_id: string;
@@ -58,7 +81,7 @@ export type Assessment = {
   later: AssessmentItem[];
   flags: { requirement_id: string; reason: string }[];
   findings: Finding[];
-  agents: { agent: Area; mode: string | null; tool_calls: number; findings: number; error: string | null }[];
+  agents: AgentRun[];
   cached: boolean;
   cached_at: string | null;
   disclaimer: string;

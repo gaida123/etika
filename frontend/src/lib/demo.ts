@@ -6,9 +6,11 @@
 // State lives in memory, so a reload resets the preview.
 
 import type {
+  AgentRun,
   Assessment,
   AssessmentItem,
   AgentTraceEntry,
+  Area,
   BusinessProfile,
   ChatResponse,
   DraftEmail,
@@ -18,6 +20,31 @@ import type {
 } from "./api";
 
 export const DEMO_ID = "demo";
+
+/** Mirrors backend/app/agents/personas.py, with sample voiced lines. */
+const PERSONAS: Record<Area, AgentRun["persona"]> = {
+  registration: {
+    id: "registrar_v1", display_name: "The Registrar", role_title: "Registration & licensing",
+    specialty: "Business name registration with BC Registries, the City of Vancouver business licence, and your CRA business number",
+    avatar: "registrar",
+  },
+  tax: {
+    id: "counter_v1", display_name: "The Counter", role_title: "Sales tax thresholds",
+    specialty: "BC PST and GST/HST registration, the small seller and small supplier tests, and how close your revenue is to each threshold",
+    avatar: "counter",
+  },
+  employer: {
+    id: "foreman_v1", display_name: "The Foreman", role_title: "Hiring & payroll",
+    specialty: "WorkSafeBC registration, your CRA payroll account, minimum wage, pay statements, payroll records, and employee vs contractor status",
+    avatar: "foreman",
+  },
+};
+
+const DEMO_SUMMARY: Record<Area, string> = {
+  registration: "Two files are open on my desk: the name first, then the City of Vancouver licence.",
+  tax: "You're under both lines for now, and I'll keep counting as your months come in.",
+  employer: "Nothing switches on until you take someone on. When you do, I'll walk you through it.",
+};
 
 const NO_LINK = "sample-link";
 
@@ -185,7 +212,10 @@ function assessment(): Assessment {
       claims: [], confidence: 0.8,
       flags: i.requirement_id === "TAX-01" ? ["Regular market sales may affect the premises condition"] : [],
     })),
-    agents: (["registration", "tax", "employer"] as const).map((agent) => ({ agent, mode: null, tool_calls: 4, findings: 0, error: null })),
+    agents: (["registration", "tax", "employer"] as const).map((agent) => ({
+      agent, mode: null, tool_calls: 4, findings: 0, cached_findings: 0, error: null,
+      persona: PERSONAS[agent], summary: DEMO_SUMMARY[agent], summary_source: "model" as const,
+    })),
     cached: false, cached_at: null, disclaimer: "General information, not legal advice.",
   };
 }
