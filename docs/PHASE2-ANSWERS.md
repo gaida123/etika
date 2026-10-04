@@ -9,6 +9,7 @@ This records decisions against `PHASE2-HANDOFF.md`. It does not modify Developer
 > (`knowledge_base_version()`, `retrieve_many()`, `make_chunk_id`, reviewed
 > `action_url`s).
 
+
 ## Q1. `depends_on` collision
 
 **Decision:** use `Requirement.required_fact_keys` for profile fact dependencies.
