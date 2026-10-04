@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.facts import BusinessProfile
 from app.core.db import get_session
+from app.core.services import Services, get_services
 from app.intake import profile_service
 from app.intake.profile_service import ProfileCreate, ProfileNotFoundError
 from app.intake.proposals import (
@@ -15,11 +16,13 @@ from app.intake.proposals import (
     ProposalNotFoundError,
     confirm_proposal,
 )
+from app.intake.questions import FollowUpQuestion, follow_up_questions
 from app.intake.schemas import ConfirmUpdateRequest, ConfirmUpdateResponse
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
+ServicesDep = Annotated[Services, Depends(get_services)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -52,5 +55,12 @@ def confirm_update(business_id: str, body: ConfirmUpdateRequest, session: Sessio
         raise HTTPException(status_code=409, detail="Proposal already confirmed") from exc
     except InvalidConfirmationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # TODO(D2-07): trigger re-assessment here once the orchestrator exists.
     return ConfirmUpdateResponse(proposal_id=body.proposal_id, applied_keys=applied, profile=profile)
+
+
+@router.get("/{business_id}/questions")
+def get_questions(business_id: str, session: SessionDep, services: ServicesDep) -> list[FollowUpQuestion]:
+    profile = profile_service.get_latest(session, business_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return follow_up_questions(services.applicability.evaluate(profile))
