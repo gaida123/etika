@@ -533,6 +533,24 @@
     opacity: 1;
   }
 
+  /* Collapsible panel (agent trace). */
+  .fold > summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  .fold > summary::-webkit-details-marker {
+    display: none;
+  }
+  .fold > summary:hover {
+    background: var(--color-side);
+  }
+  .fold .chev {
+    transition: transform 0.2s ease;
+  }
+  .fold[open] .chev {
+    transform: rotate(180deg);
+  }
+
   /* Check in progress (wireframe "Checking"). */
   .ck-spin {
     display: inline-block;

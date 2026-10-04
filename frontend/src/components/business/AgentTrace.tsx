@@ -41,23 +41,27 @@ function time(iso: string): string | null {
 
 export function AgentTrace({ trace }: { trace: AgentTraceEntry[] }) {
   return (
-    <section id="agent-trace" aria-labelledby="trace-h" className="box scroll-mt-6 overflow-hidden">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 bg-panel px-5 py-4">
+    // Closed by default: the trace is there for anyone who wants to inspect the work, not to read first.
+    <details id="agent-trace" className="fold box scroll-mt-6 overflow-hidden">
+      <summary className="flex flex-wrap items-center justify-between gap-2 bg-panel px-5 py-4">
         <div>
-          <h2 id="trace-h" className="m-0 text-base font-medium">
-            Agent trace
-          </h2>
+          <h2 className="m-0 text-base font-medium">Agent trace</h2>
           <p className="muted mt-1 mb-0 text-[13px]">What the agents checked for this assessment.</p>
         </div>
-        <span className="muted text-sm">{trace.length} {trace.length === 1 ? "step" : "steps"} saved</span>
-      </div>
+        <span className="muted flex items-center gap-3 text-sm">
+          {trace.length} {trace.length === 1 ? "step" : "steps"} saved
+          <svg className="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </span>
+      </summary>
 
       {trace.length === 0 ? (
-        <p className="muted m-0 p-5 text-sm">
+        <p className="muted m-0 border-t border-line-soft p-5 text-sm">
           No saved agent steps were returned for this assessment. Source citations are still shown on each requirement.
         </p>
       ) : (
-        <ol className="m-0 list-none divide-y divide-line-soft p-0">
+        <ol className="m-0 list-none divide-y divide-line-soft border-t border-line-soft p-0">
           {trace.map((entry, index) => {
             const context = summaryContext(entry);
             const label = TOOL_LABEL[entry.tool_name] ?? entry.tool_name.replace(/_/g, " ");
@@ -79,6 +83,6 @@ export function AgentTrace({ trace }: { trace: AgentTraceEntry[] }) {
           })}
         </ol>
       )}
-    </section>
+    </details>
   );
 }
