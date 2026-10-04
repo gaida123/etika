@@ -13,6 +13,9 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.agents.schemas import AgentReport, ClaimDraft, FindingDraft
+from app.chat.router import RouteChoice
+from app.chat.schemas import ChatAnswerDraft
+from app.intake.schemas import ExtractedFact
 
 REQ_RE = re.compile(r"\b((?:REG|TAX|EMP)-\d{2})\b")
 SECTION_RE = re.compile(r"^## ((?:REG|TAX|EMP)-\d{2}):", re.M)
@@ -40,9 +43,17 @@ def response(parts: list[types.Part]) -> types.GenerateContentResponse:
 class FakeGemini:
     """Provides ``generate`` (tool turns) and ``structured`` (reports)."""
 
-    def __init__(self, calls_per_turn: int | None = None, fail_report_for: str | None = None) -> None:
+    def __init__(
+        self,
+        calls_per_turn: int | None = None,
+        fail_report_for: str | None = None,
+        classifier_choice: str = "registration",
+        chat_without_evidence: bool = False,
+    ) -> None:
         self.calls_per_turn = calls_per_turn
         self.fail_report_for = fail_report_for
+        self.classifier_choice = classifier_choice
+        self.chat_without_evidence = chat_without_evidence
         self.requests = 0
 
     async def generate(
@@ -73,6 +84,10 @@ class FakeGemini:
 
     async def structured(self, prompt: str, system: str, schema: type[BaseModel]) -> Any:
         self.requests += 1
+        if schema is RouteChoice:
+            return RouteChoice(agent=self.classifier_choice)
+        if schema is ChatAnswerDraft:
+            return self._chat_answer(prompt)
         assert schema is AgentReport
         agent = agent_of(system)
         if agent == self.fail_report_for:
@@ -96,3 +111,13 @@ class FakeGemini:
             FindingDraft(requirement_id="EMP-99", explanation="out of scope", claims=[], flags=[], confidence=1.0)
         )
         return AgentReport(findings=findings)
+
+    def _chat_answer(self, prompt: str) -> ChatAnswerDraft:
+        evidence = [] if self.chat_without_evidence else EVIDENCE_RE.findall(prompt)
+        claims = [ClaimDraft(text="The official source says so.", chunk_ids=evidence[:1])] if evidence else []
+        claims.append(ClaimDraft(text="Made-up claim.", chunk_ids=[INVENTED_CHUNK]))
+        question = prompt.split("<owner_question>")[-1]
+        facts = []
+        if "hired" in question.lower():
+            facts.append(ExtractedFact(key="has_employees", value="true", confidence=0.95, evidence="hired"))
+        return ChatAnswerDraft(answer="Grounded answer.", claims=claims, proposed_facts=facts)
