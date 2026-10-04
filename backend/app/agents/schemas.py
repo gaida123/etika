@@ -1,5 +1,6 @@
 """Agent-side models: what Gemini reports, and what one agent run hands to the orchestrator."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -82,4 +83,8 @@ class AssessmentResponse(BaseModel):
     flags: list[Flag]
     findings: list[Finding]
     agents: list[AgentRunSummary]
+    cached: bool = Field(
+        default=False, description="True when a live agent failed and this is the last full result for the same facts."
+    )
+    cached_at: datetime | None = None
     disclaimer: str = "General information, not legal advice."
