@@ -82,6 +82,18 @@ commands are `python scripts/migrate_vector_schema.py --apply`, then
 `python scripts/migrate_vector_schema.py --apply --create-index`. Do not set `USE_STUBS=false` until
 the real registry, applicability, calculator and scoring services are wired.
 
+To run the real Phase 1 service bundle, load the registry first:
+
+```powershell
+python scripts/load_registry.py --apply
+```
+
+Then set `USE_STUBS=false`. Production exposes only registry rows marked `approved`; the current
+demo registry is deliberately enabled through `ALLOW_DRAFT_REGISTRY=true` in the local environment.
+Draft `TODO-*` action URLs are stored as unavailable (`null`) so the UI must disable their action
+button. `REG-02` (Vancouver business licence) remains an intentional `insufficient_evidence` gap
+until an official City of Vancouver source is ingested and mapped.
+
 ## Test
 
 ```powershell

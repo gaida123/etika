@@ -45,9 +45,23 @@ def build_stub_services() -> Services:
 
 
 def build_real_services() -> Services:
-    """Developer 1 wires the TiDB-backed implementations here."""
-    raise NotImplementedError(
-        "Real services are not wired yet (Developer 1). Set USE_STUBS=true for now."
+    """Wire the TiDB registry/retrieval and deterministic Phase 1 engine."""
+    from app.assessment.engine import (
+        DeterministicApplicabilityService,
+        DeterministicCalculatorService,
+        DeterministicScoringService,
+    )
+    from app.knowledge.tidb_registry import TiDBRegistryService
+    from app.knowledge.tidb_retrieval import TiDBRetrievalService
+
+    registry = TiDBRegistryService()
+    calculators = DeterministicCalculatorService()
+    return Services(
+        registry=registry,
+        retrieval=TiDBRetrievalService(),
+        applicability=DeterministicApplicabilityService(registry, calculators),
+        calculators=calculators,
+        scoring=DeterministicScoringService(registry),
     )
 
 

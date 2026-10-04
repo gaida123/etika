@@ -25,6 +25,8 @@ class RegistryService(Protocol):
 
     def list_by_area(self, area: Area) -> list[Requirement]: ...
 
+    def all(self) -> list[Requirement]: ...
+
 
 class ApplicabilityService(Protocol):
     """Decides, in code, which requirements apply to a profile."""
